@@ -1,0 +1,561 @@
+start_frame,end_frame,class
+6437,6449,Jab
+6452,6460,Rear Hook
+6463,6470,Lead hook
+6532,6544,Jab
+6546,6558,Rear Hook
+6561,6568,Jab
+6806,6814,Jab
+6815,6820,Rear Hook
+6821,6828,Lead hook
+6881,6889,Jab
+6890,6896,Rear Hook
+6897,6905,Jab
+7123,7130,Jab
+7132,7139,Cross
+7141,7148,Jab
+7150,7156,Cross
+7159,7166,Jab
+7169,7175,Cross
+7177,7184,Jab
+7186,7193,Cross
+7194,7202,Jab
+7204,7209,Cross
+7211,7219,Jab
+7221,7226,Cross
+7229,7235,Jab
+7238,7244,Cross
+7246,7253,Jab
+7255,7261,Cross
+7264,7271,Jab
+7658,7663,Cross
+7666,7673,Jab
+7675,7680,Cross
+7683,7689,Jab
+7691,7696,Cross
+7699,7706,Jab
+7708,7713,Cross
+7715,7722,Jab
+7724,7730,Cross
+7732,7739,Jab
+7741,7746,Cross
+7748,7754,Jab
+7756,7762,Cross
+7764,7770,Jab
+7773,7778,Cross
+7780,7787,Jab
+7789,7794,Cross
+7796,7804,Jab
+7805,7811,Cross
+7813,7820,Jab
+7822,7827,Cross
+7829,7836,Jab
+7837,7842,Cross
+7882,7892,Jab
+7895,7903,Rear Hook
+7907,7914,Lead hook
+7995,8004,Jab
+8006,8013,Rear Hook
+8016,8022,Lead hook
+8069,8079,Jab
+8080,8087,Rear Hook
+8088,8095,Lead hook
+8207,8215,Rear Uppercut
+8308,8315,Rear Uppercut
+8362,8386,Rear Uppercut
+8387,8398,Lead Uppercut
+8458,8467,Jab
+8468,8469,Rear Uppercut
+8475,8481,Lead Uppercut
+8552,8559,Jab
+8560,8566,Cross
+8569,8576,Jab
+8577,8583,Cross
+8585,8593,Jab
+8595,8600,Cross
+8602,8610,Jab
+8612,8617,Cross
+8620,8629,Jab
+8674,8684,Lead hook
+8736,8746,Lead hook
+8762,8769,Rear Uppercut
+8776,8782,Rear Uppercut
+8791,8798,Rear Uppercut
+8860,8868,Lead Uppercut
+8969,8977,Lead Uppercut
+9053,9060,Jab
+9063,9069,Cross
+9071,9078,Jab
+9079,9085,Cross
+9088,9095,Jab
+9097,9103,Cross
+9106,9113,Jab
+9115,9121,Cross
+9123,9130,Jab
+9132,9137,Cross
+9140,9146,Jab
+9149,9154,Cross
+9157,9162,Jab
+9165,9171,Cross
+9172,9180,Jab
+9182,9187,Cross
+9190,9197,Jab
+9199,9204,Cross
+9207,9213,Jab
+9216,9221,Cross
+9223,9230,Jab
+9232,9237,Cross
+9239,9247,Jab
+9249,9253,Cross
+9256,9263,Jab
+9264,9269,Cross
+9309,9316,Jab
+9317,9322,Rear Hook
+9413,9419,Lead hook
+9421,9425,Rear Hook
+9426,9431,Lead hook
+9504,9512,Jab
+9512,9518,Rear Hook
+9519,9524,Lead hook
+9546,9554,Jab
+9574,9582,Cross
+9637,9645,Jab
+9646,9651,Rear Hook
+9653,9658,Lead Uppercut
+9731,9738,Jab
+9739,9744,Rear Hook
+9745,9751,Lead Uppercut
+9828,9836,Jab
+9837,9841,Rear Hook
+9843,9847,Lead Uppercut
+9927,9935,Jab
+9936,9941,Rear Hook
+9943,9948,Lead hook
+10043,10051,Jab
+10052,10056,Rear Hook
+10058,10062,Lead hook
+10203,10210,Jab
+10211,10216,Rear Hook
+10217,10221,Lead hook
+10314,10323,Jab
+10324,10328,Rear Hook
+10330,10334,Lead Uppercut
+10362,10370,Jab
+10404,10410,Jab
+10411,10416,Rear Hook
+10417,10421,Lead hook
+10514,10522,Jab
+10523,10528,Rear Hook
+10530,10534,Lead hook
+10596,10603,Jab
+10605,10609,Rear Hook
+10611,10615,Lead hook
+10677,10685,Jab
+10687,10690,Rear Hook
+10692,10697,Lead hook
+12179,12189,Jab
+12192,12199,Rear Uppercut
+12203,12210,Lead Uppercut
+12212,12220,Rear Uppercut
+12223,12233,Lead hook
+12293,12303,Jab
+12305,12311,Rear Uppercut
+12316,12325,Lead Uppercut
+12325,12332,Rear Uppercut
+12337,12346,Lead hook
+12378,12388,Jab
+12402,12413,Jab
+12415,12421,Rear Uppercut
+12426,12434,Lead Uppercut
+12435,12441,Rear Uppercut
+12447,12454,Lead hook
+12485,12497,Jab
+12520,12529,Jab
+12532,12539,Rear Uppercut
+12545,12553,Lead Uppercut
+12558,12566,Rear Uppercut
+12573,12582,Lead hook
+12674,12682,Jab
+12685,12691,Rear Uppercut
+12697,12705,Lead hook
+12710,12715,Rear Uppercut
+12721,12730,Lead hook
+12869,12883,Lead hook
+12884,12892,Rear Hook
+12899,12912,Lead hook
+12914,12923,Rear Hook
+12945,12954,Lead hook
+12970,12979,Rear Hook
+12996,13004,Lead hook
+13017,13026,Rear Hook
+13033,13042,Lead hook
+13046,13054,Rear Hook
+13061,13071,Lead hook
+13074,13082,Rear Hook
+13089,13100,Lead hook
+13102,13111,Rear Hook
+13117,13125,Lead hook
+13129,13137,Rear Hook
+13143,13153,Lead hook
+13156,13164,Rear Hook
+13169,13178,Lead hook
+13182,13192,Rear Hook
+13196,13206,Lead hook
+13210,13219,Rear Hook
+13224,13232,Lead hook
+13514,13523,Lead hook
+13526,13534,Rear Hook
+13541,13550,Lead hook
+13554,13562,Rear Hook
+13568,13576,Lead hook
+13618,13627,Jab
+13629,13634,Rear Uppercut
+13641,13645,Lead Uppercut
+13646,13652,Rear Uppercut
+13658,13666,Lead hook
+13735,13742,Jab
+13745,13750,Rear Uppercut
+13753,13759,Lead Uppercut
+13761,13767,Rear Uppercut
+13770,13780,Lead hook
+13812,13824,Jab
+13845,13855,Jab
+13858,13867,Rear Uppercut
+13874,13885,Lead Uppercut
+13890,13900,Rear Uppercut
+13907,13916,Lead hook
+13945,13952,Jab
+13995,14002,Jab
+14004,14008,Rear Uppercut
+14011,14015,Lead Uppercut
+14017,14022,Rear Uppercut
+14024,14031,Lead hook
+14086,14093,Jab
+14094,14100,Rear Uppercut
+14101,14107,Lead Uppercut
+14108,14113,Rear Uppercut
+14117,14124,Lead hook
+14188,14195,Jab
+14197,14202,Rear Uppercut
+14204,14210,Lead Uppercut
+14211,14216,Rear Uppercut
+14220,14228,Lead hook
+14331,14340,Lead hook
+14343,14352,Rear Hook
+14359,14367,Lead hook
+14370,14379,Rear Hook
+14383,14392,Lead hook
+14396,14404,Rear Hook
+14410,14419,Lead hook
+14421,14429,Rear Hook
+14434,14444,Lead hook
+14447,14455,Rear Hook
+14460,14470,Lead hook
+14472,14480,Rear Hook
+14486,14495,Lead hook
+14498,14506,Rear Hook
+14511,14519,Lead hook
+14677,14683,Jab
+14684,14688,Rear Uppercut
+14689,14692,Lead Uppercut
+14693,14697,Rear Uppercut
+14700,14706,Lead hook
+14763,14769,Jab
+14770,14773,Rear Uppercut
+14775,14778,Lead Uppercut
+14779,14782,Rear Uppercut
+14784,14790,Lead hook
+14876,14882,Rear Hook
+14889,14900,Lead hook
+14903,14910,Rear Hook
+14916,14926,Lead hook
+14930,14937,Rear Hook
+15048,15056,Jab
+15099,15105,Jab
+15106,15109,Rear Uppercut
+15110,15113,Lead Uppercut
+15114,15118,Rear Uppercut
+15120,15127,Lead hook
+15187,15193,Jab
+15194,15198,Rear Uppercut
+15199,15203,Lead Uppercut
+15204,15207,Rear Uppercut
+15210,15216,Lead hook
+15338,15344,Jab
+15345,15349,Rear Uppercut
+15350,15353,Lead Uppercut
+15354,15358,Rear Uppercut
+15361,15366,Lead hook
+15486,15492,Jab
+15493,15497,Rear Uppercut
+15498,15501,Lead Uppercut
+15502,15505,Rear Uppercut
+15510,15515,Lead hook
+15609,15614,Jab
+15616,15620,Rear Uppercut
+15621,15624,Lead Uppercut
+15625,15628,Rear Uppercut
+15630,15637,Lead hook
+15650,15657,Jab
+15710,15716,Jab
+15717,15721,Rear Uppercut
+15722,15725,Lead Uppercut
+15726,15729,Rear Uppercut
+15732,15738,Lead hook
+15841,15847,Jab
+15848,15852,Rear Uppercut
+15853,15856,Lead Uppercut
+15857,15861,Rear Uppercut
+15863,15868,Lead hook
+15895,15902,Jab
+15955,15961,Jab
+15962,15965,Rear Uppercut
+15966,15969,Lead Uppercut
+15970,15973,Rear Uppercut
+15976,15982,Lead hook
+16086,16092,Jab
+16093,16097,Rear Uppercut
+16099,16103,Lead Uppercut
+16104,16108,Rear Uppercut
+16111,16118,Lead hook
+16264,16271,Jab
+16272,16276,Rear Uppercut
+16277,16281,Lead Uppercut
+16282,16285,Rear Uppercut
+16288,16295,Lead hook
+16318,16328,Jab
+16367,16374,Jab
+16375,16379,Rear Uppercut
+16380,16383,Lead Uppercut
+16384,16388,Rear Uppercut
+16391,16397,Lead hook
+17939,17947,Jab
+17950,17958,Rear Uppercut
+17963,17972,Lead Uppercut
+17975,17983,Rear Uppercut
+17992,18003,Lead hook
+18031,18037,Lead Uppercut
+18049,18059,Lead hook
+18136,18147,Jab
+18152,18160,Rear Uppercut
+18167,18175,Lead Uppercut
+18179,18186,Rear Uppercut
+18192,18201,Lead hook
+18220,18227,Lead Uppercut
+18238,18245,Lead hook
+18379,18391,Jab
+18395,18402,Rear Uppercut
+18408,18415,Lead Uppercut
+18420,18433,Rear Uppercut
+18436,18447,Lead hook
+18469,18477,Lead Uppercut
+18488,18498,Lead hook
+18605,18613,Jab
+18614,18620,Rear Uppercut
+18622,18628,Lead Uppercut
+18629,18635,Rear Uppercut
+18638,18646,Lead hook
+18661,18667,Lead Uppercut
+18677,18683,Lead hook
+18776,18783,Jab
+18785,18789,Rear Uppercut
+18792,18796,Lead Uppercut
+18798,18804,Rear Uppercut
+18806,18813,Lead hook
+18825,18831,Lead Uppercut
+18839,18846,Lead hook
+18917,18924,Jab
+18925,18931,Rear Uppercut
+18933,18938,Lead Uppercut
+18939,18945,Rear Uppercut
+18948,18957,Lead hook
+18970,18976,Lead Uppercut
+18982,18989,Lead hook
+19087,19095,Jab
+19097,19105,Rear Uppercut
+19108,19115,Lead Uppercut
+19118,19126,Rear Uppercut
+19132,19140,Lead hook
+19160,19166,Lead Uppercut
+19177,19186,Lead hook
+19258,19265,Jab
+19266,19270,Rear Uppercut
+19272,19276,Lead Uppercut
+19277,19282,Rear Uppercut
+19284,19290,Lead hook
+19303,19308,Lead Uppercut
+19316,19323,Lead hook
+19354,19361,Lead Uppercut
+19364,19369,Rear Hook
+19371,19377,Lead hook
+19379,19384,Rear Hook
+19386,19392,Lead hook
+19394,19399,Rear Hook
+19403,19408,Lead hook
+19410,19416,Rear Hook
+19418,19425,Lead hook
+19428,19433,Rear Hook
+19436,19443,Lead hook
+19445,19450,Rear Hook
+19452,19458,Lead hook
+19460,19464,Rear Hook
+19467,19472,Lead hook
+19474,19479,Rear Hook
+19482,19486,Lead hook
+19942,19947,Rear Hook
+19949,19954,Lead hook
+19956,19962,Rear Hook
+19964,19969,Lead hook
+19971,19977,Rear Hook
+19980,19985,Lead hook
+19987,19993,Rear Hook
+19995,20000,Lead hook
+20002,20007,Rear Hook
+20010,20014,Lead hook
+20016,20022,Rear Hook
+20024,20029,Lead hook
+20031,20036,Rear Hook
+20039,20044,Lead hook
+20046,20051,Rear Hook
+20054,20058,Lead hook
+20060,20065,Rear Hook
+20067,20073,Lead hook
+20107,20116,Jab
+20119,20126,Rear Uppercut
+20133,20140,Lead Uppercut
+20146,20153,Rear Uppercut
+20160,20168,Lead hook
+20189,20195,Lead Uppercut
+20206,20214,Lead hook
+20261,20271,Jab
+20273,20280,Rear Uppercut
+20284,20292,Lead Uppercut
+20294,20302,Rear Uppercut
+20305,20317,Lead hook
+20338,20346,Lead Uppercut
+20358,20366,Lead hook
+20438,20444,Jab
+20445,20449,Rear Uppercut
+20450,20454,Lead Uppercut
+20455,20458,Rear Uppercut
+20461,20467,Lead hook
+20477,20482,Lead Uppercut
+20483,20485,Cross
+20488,20493,Lead hook
+20548,20554,Jab
+20556,20560,Rear Uppercut
+20561,20564,Lead Uppercut
+20566,20569,Rear Uppercut
+20572,20579,Lead hook
+20589,20595,Rear Uppercut
+20601,20607,Lead hook
+20662,20667,Jab
+20668,20673,Rear Uppercut
+20674,20677,Lead Uppercut
+20678,20681,Rear Uppercut
+20685,20690,Lead hook
+20702,20707,Lead Uppercut
+20716,20721,Lead hook
+20787,20793,Lead hook
+20794,20800,Rear Hook
+20803,20811,Lead hook
+20813,20818,Rear Hook
+20820,20826,Lead hook
+20828,20833,Rear Hook
+20836,20842,Lead hook
+21358,21363,Rear Hook
+21365,21371,Lead hook
+21373,21378,Rear Hook
+21380,21385,Lead hook
+21387,21392,Rear Hook
+21394,21399,Lead hook
+21401,21407,Rear Hook
+21408,21413,Lead hook
+21415,21421,Rear Hook
+21423,21428,Lead hook
+21430,21435,Rear Hook
+21437,21442,Lead hook
+21444,21450,Rear Hook
+21451,21457,Lead hook
+21459,21464,Rear Hook
+21465,21471,Lead hook
+21472,21477,Rear Hook
+21478,21484,Lead hook
+21486,21491,Rear Hook
+21531,21538,Jab
+21539,21543,Rear Uppercut
+21544,21547,Lead Uppercut
+21548,21553,Rear Uppercut
+21555,21561,Lead hook
+21571,21577,Lead Uppercut
+21582,21589,Lead hook
+21655,21661,Jab
+21662,21667,Rear Uppercut
+21668,21671,Lead Uppercut
+21672,21676,Rear Uppercut
+21677,21685,Lead hook
+21695,21702,Lead Uppercut
+21707,21714,Lead hook
+21800,21807,Jab
+21808,21813,Rear Uppercut
+21814,21818,Lead Uppercut
+21819,21823,Rear Uppercut
+21825,21833,Lead hook
+21846,21852,Lead Uppercut
+21860,21868,Lead hook
+21965,21971,Jab
+21973,21977,Rear Uppercut
+21978,21982,Lead Uppercut
+21983,21987,Rear Uppercut
+21990,21997,Lead hook
+22010,22017,Lead Uppercut
+22023,22030,Lead hook
+22112,22118,Jab
+22118,22123,Rear Uppercut
+22124,22128,Lead Uppercut
+22129,22132,Rear Uppercut
+22136,22143,Lead hook
+22154,22159,Lead Uppercut
+22166,22173,Lead hook
+23686,23696,Jab
+23699,23708,Rear Uppercut
+23711,23720,Lead Uppercut
+23722,23732,Rear Uppercut
+23738,23749,Lead hook
+23770,23779,Lead hook
+23791,23809,Lead hook
+23841,23849,Rear Hook
+23869,23877,Jab
+23912,23922,Jab
+23925,23934,Rear Uppercut
+23939,23948,Lead Uppercut
+23950,23960,Rear Uppercut
+23965,23977,Lead hook
+23998,24007,Lead Uppercut
+24017,24030,Lead hook
+24068,24074,Rear Uppercut
+24092,24102,Jab
+24142,24151,Jab
+24153,24162,Rear Uppercut
+24165,24175,Lead Uppercut
+24177,24183,Rear Uppercut
+24188,24197,Lead hook
+24215,24222,Lead Uppercut
+24234,24242,Lead hook
+24279,24285,Rear Uppercut
+24393,24402,Jab
+24404,24412,Rear Uppercut
+24415,24423,Lead Uppercut
+24424,24432,Rear Uppercut
+24436,24443,Lead hook
+24463,24470,Lead Uppercut
+24481,24489,Lead hook
+24517,24523,Rear Uppercut
+24601,24609,Jab
+24610,24617,Rear Uppercut
+24621,24627,Lead Uppercut
+24629,24635,Rear Uppercut
+24641,24649,Lead hook
+24667,24676,Lead Uppercut
+24686,24696,Lead hook
+24725,24731,Rear Uppercut
