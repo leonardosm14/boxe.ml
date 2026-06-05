@@ -1,27 +1,153 @@
-# Configuração do Ambiente — TensorFlow + GPU (H100)
+# Detecção e Classificação de Golpes em Boxe
 
-Instruções para resolver o conflito de versão do CuDNN que impede o TensorFlow de usar a GPU.
+Pipeline para reconhecimento automático de golpes de boxe utilizando **YOLOv8 Pose** para extração de esqueletos humanos e **TensorFlow** para classificação automática dos golpes.
+
+Os golpes atualmente suportados são:
+
+* Jab
+* Cross
+* Lead Hook
+* Lead Uppercut
+* Rear Hook
+* Rear Uppercut
+
+O sistema recebe um vídeo como entrada, extrai os keypoints corporais utilizando o modelo de pose do YOLOv8, realiza o pré-processamento dos esqueletos e aplica um modelo treinado em TensorFlow para identificar os golpes ao longo do vídeo.
+
+---
+
+# Instalação
+
+## 1. Clonar o projeto
+
+```bash
+git clone <repositorio>
+cd boxe.ml
+```
+
+## 2. Instalar dependências
+
+```bash
+pip install -r requirements.txt
+```
+
+## Modelo treinado
+
+Por padrão o script procura por `modelo_boxe.keras` na raiz do projeto. Também é possível especificar outro modelo utilizando o parâmetro `--model` ou (`-m`).
+
+---
+
+# Executando a Inferência
+
+## Exemplo básico
+
+```bash
+python3 boxe.py \
+    -v videos/exemplo.mp4
+```
+
+O vídeo processado será salvo automaticamente em:
+
+```text
+outputs/exemplo.mp4
+```
+
+---
+
+## Especificando um modelo customizado
+
+```bash
+python3 boxe.py \
+    -v videos/exemplo.mp4 \
+    -m modelos/meu_modelo.keras
+```
+
+---
+
+## Especificando o vídeo de saída
+
+```bash
+python3 boxe.py \
+    -v videos/exemplo.mp4 \
+    -o resultado.mp4
+```
+
+---
+
+## Limpando o cache de esqueletos
+
+Durante a primeira execução, os esqueletos extraídos pelo YOLO são armazenados em cache para acelerar execuções futuras.
+
+Para forçar uma nova extração:
+
+```bash
+python3 boxe.py \
+    -v videos/exemplo.mp4 \
+    --clear-cache
+```
+
+---
+
+# Pipeline de Processamento
+
+O processamento ocorre em três etapas principais.
+
+## 1. Extração de Esqueletos
+
+O YOLOv8-Pose detecta o atleta e extrai:
+
+* 17 keypoints corporais (formato `COCO`)
+* Coordenadas normalizadas pela resolução do vídeo
+* Rastreamento temporal dos movimentos
+
+Os esqueletos são armazenados em cache no formato:
+
+```text
+skeletons_<nome_do_video>.npy
+```
+
+---
+
+## 2. Classificação dos Golpes
+
+Para cada frame:
+
+* Uma janela temporal de 25 frames é construída
+* Os keypoints são normalizados
+* São calculadas posições, velocidades e acelerações
+
+Esses dados são enviados para o modelo TensorFlow treinado.
+
+---
+
+## 3. Geração do Vídeo
+
+O sistema:
+
+* Aplica suavização temporal das predições
+* Filtra predições com baixa confiança
+* Sobrepõe os rótulos dos golpes no vídeo
+* Exporta o resultado em H.264
+
+---
+
+# Configuração TensorFlow + GPU (H100)
 
 ## Problema
 
-O sistema possui CuDNN 9.1 instalado em `/lib/x86_64-linux-gnu/`, mas o TensorFlow 2.21 foi compilado com CuDNN 9.3. O TF carrega a versão do sistema (9.1) antes da versão correta instalada pelo pip, resultando no erro:
+Em alguns ambientes, o TensorFlow pode carregar uma versão incompatível do CuDNN:
 
-```
+```text
 Loaded runtime CuDNN library: 9.1.0 but source was compiled with: 9.3.0.
 Dnn is not supported
 ```
 
-## Solução
-
-Substitua as libs do sistema por symlinks apontando para a versão 9.3 instalada no ambiente conda.
-
-### 1. Instalar o CuDNN 9.3 via pip (se ainda não instalado)
+## Instalar CuDNN 9.3
 
 ```bash
 pip install nvidia-cudnn-cu12==9.3.0.75
 ```
 
-### 2. Criar os symlinks
+## Criar links simbólicos
 
 ```bash
 CUDNN_SRC=/root/anaconda3/envs/lapixdl/lib/python3.11/site-packages/nvidia/cudnn/lib
@@ -37,27 +163,46 @@ ln -sf $CUDNN_SRC/libcudnn_engines_precompiled.so.9      $CUDNN_DST/libcudnn_eng
 ln -sf $CUDNN_SRC/libcudnn_engines_runtime_compiled.so.9 $CUDNN_DST/libcudnn_engines_runtime_compiled.so.9
 ```
 
-### 3. Verificar
+## Verificação
 
 ```bash
 ldconfig -p | grep cudnn
 ```
 
-Todos os caminhos devem apontar para `/root/anaconda3/envs/lapixdl/...`.
+Os caminhos exibidos devem apontar para:
 
-### 4. Reiniciar o kernel do Jupyter
+```text
+/root/anaconda3/envs/lapixdl/...
+```
 
-Após os symlinks, reinicie o kernel.
+## Reiniciar o ambiente
 
-## Ambiente
+Após criar os links simbólicos, reinicie o terminal ou kernel do Jupyter para garantir que o TensorFlow carregue as bibliotecas corretas.
 
-| Componente | Versão |
-|---|---|
-| TensorFlow | 2.21.0 |
-| CuDNN (runtime) | 9.3.0.75 |
-| CUDA toolkit | 12.4 |
-| Driver NVIDIA | 570.195.03 |
-| CUDA (driver) | 12.8 |
-| Python | 3.11 |
-| Conda env | `lapixdl` |
-| GPU | NVIDIA H100 80GB HBM3 (×8) |
+---
+
+# Ambiente de Referência
+
+| Componente     | Versão                     |
+| -------------- | -------------------------- |
+| TensorFlow     | 2.21.0                     |
+| Ultralytics    | 8.x                        |
+| CuDNN          | 9.3.0.75                   |
+| CUDA Toolkit   | 12.4                       |
+| CUDA Driver    | 12.8                       |
+| Driver NVIDIA  | 570.195.03                 |
+| Python         | 3.11                       |
+| Ambiente Conda | `lapixdl`                  |
+| GPU            | NVIDIA H100 80GB HBM3 (8x) |
+
+---
+
+# Observações
+
+Na primeira execução, o YOLOv8 fará automaticamente o download do modelo:
+
+```text
+yolov8m-pose.pt
+```
+
+Esse download ocorre apenas uma vez e o arquivo será armazenado no cache do Ultralytics para reutilização em execuções futuras.
