@@ -1,2 +1,5 @@
 .ipynb_checkpoints
 .jp
+*.pt
+skeletons*
+best_model*
