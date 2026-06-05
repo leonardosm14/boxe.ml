@@ -23,8 +23,8 @@ def load_video(video: str):
 
 
 def add_velocity_and_acceleration(X):
-    vel = np.diff(X, axis=1, prepend=X[:, :1, :])
-    acc = np.diff(vel, axis=1, prepend=vel[:, :1, :])
+    vel = np.diff(X, axis=1, prepend=np.zeros_like(X[:, :1, :]))
+    acc = np.diff(vel, axis=1, prepend=np.zeros_like(vel[:, :1, :]))
     return np.concatenate([X, vel, acc], axis=-1)
 
 
