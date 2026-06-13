@@ -23,6 +23,49 @@ BOXING_CLASSES = ["Cross", "Jab", "Lead Hook", "Lead Uppercut", "Rear Hook", "Re
 X_MEAN_GLOBAL = 0.1763427519365391
 X_STD_GLOBAL  = 0.24370889809812205
 
+def ensure_25fps(video_path):
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+
+    if abs(fps - 25.0) < 0.1:
+        print(f"--> Video already at {fps:.2f} FPS")
+        return video_path
+
+    output_dir = "25fps"
+    os.makedirs(output_dir, exist_ok=True)
+
+    output_path = os.path.join(
+        output_dir,
+        os.path.basename(video_path)
+    )
+
+    if os.path.exists(output_path):
+        print(f"--> 25 FPS version already exists: {output_path}")
+        return output_path
+
+    print(f"--> Converting {fps:.2f} FPS video to 25 FPS...")
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        video_path,
+        "-vf",
+        "fps=25",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-an",
+        output_path
+    ]
+
+    subprocess.run(cmd, check=True)
+
+    print(f"--> Saved 25 FPS video: {output_path}")
+
+    return output_path
 
 def extract_skeletons(video_path):
     print(f"--> [1/3] Running YOLO-Pose: {video_path}")
@@ -67,14 +110,14 @@ def preprocess_window(window_skeletons, mean=X_MEAN_GLOBAL, std=X_STD_GLOBAL):
 
 def adaptive_ema_smoothing(current_probs, smoothed_history, last_class):
     current_class = np.argmax(current_probs)
-    alpha = 0.7 if current_class != last_class else 0.2
+    alpha = 0.65 if current_class != last_class else 0.55
     if smoothed_history is None:
         return current_probs, current_class
     smoothed = alpha * current_probs + (1 - alpha) * smoothed_history
     return smoothed, current_class
 
 
-def is_confident_prediction(probs, threshold_conf=0.60, threshold_entropy=0.50):
+def is_confident_prediction(probs, threshold_conf=0.35, threshold_entropy=0.70):
     class_idx  = np.argmax(probs)
     confidence = probs[class_idx]
     entropy      = -np.sum(probs * np.log(probs + 1e-9))
@@ -109,6 +152,10 @@ def save_video_with_predictions(video_path, output_path, skeletons, model):
                 valid_indices.append(frame_idx)
 
     X_batch = np.concatenate(X_batch, axis=0)
+
+    print(f"--> Running inference on {len(valid_indices)} valid frames...")
+    valid_predictions = model.predict(X_batch, batch_size=512, verbose=1)
+
 
     print(f"--> Running inference on {len(valid_indices)} valid frames...")
     valid_predictions = model.predict(X_batch, batch_size=512, verbose=1)
@@ -200,7 +247,9 @@ if __name__ == "__main__":
     if not os.path.exists(args.video):
         print(f"Error: video '{args.video}' not found.")
         exit(1)
-
+        
+    video_path = ensure_25fps(args.video)
+    
     if args.output is None:
         output_dir = "outputs"
         os.makedirs(output_dir, exist_ok=True)
@@ -212,7 +261,7 @@ if __name__ == "__main__":
     print("--> Loading TensorFlow model...")
     loaded_model = load_model(args.model)
 
-    video_base_name = os.path.splitext(os.path.basename(args.video))[0]
+    video_base_name = os.path.splitext(os.path.basename(video_path))[0]
     cache_path = f"skeletons_{video_base_name}.npy"
 
     if args.clear_cache and os.path.exists(cache_path):
@@ -223,7 +272,7 @@ if __name__ == "__main__":
         print(f"--> Cache found: {cache_path}")
         skeletons = np.load(cache_path)
     else:
-        skeletons = extract_skeletons(args.video)
+        skeletons = extract_skeletons(video_path)
         if skeletons is not None:
             np.save(cache_path, skeletons)
 
@@ -244,10 +293,10 @@ if __name__ == "__main__":
                     mode="valid"
                 )
                 skeletons[:, joint, coord] = smoothed
-    
+        
         save_video_with_predictions(
-            args.video,
+            video_path,
             output_path,
-            skeletons,
+            skeletons, 
             loaded_model
         )
