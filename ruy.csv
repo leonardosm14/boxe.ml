@@ -1,0 +1,61 @@
+start_frame,end_frame,class
+98,107,Jab
+107,116,Cross
+135,141,Jab
+141,152,Cross
+163,178,Lead Uppercut
+211,217,Jab
+217,222,Cross
+222,234,Lead Hook
+256,264,Rear Uppercut
+264,277,Lead Hook
+316,321,Cross
+321,330,Lead Hook
+330,339,Cross
+364,380,Cross
+401,408,Jab
+408,420,Cross
+459,464,Jab
+464,470,Rear Uppercut
+470,477,Lead Uppercut
+478,489,Rear Hook
+510,515,Jab
+515,520,Rear Uppercut
+520,525,Lead Uppercut
+525,536,Rear Hook
+550,561,Lead Hook
+588,594,Jab
+594,598,Cross
+598,610,Lead Uppercut
+732,739,Jab
+739,744,Cross
+744,754,Lead Uppercut
+782,800,Rear Uppercut
+820,830,Jab
+830,835,Cross
+835,848,Lead Uppercut
+856,872,Lead Hook
+888,895,Cross
+895,901,Lead Hook
+902,914,Cross
+940,954,Cross
+968,974,Jab
+974,981,Cross
+1002,1008,Jab
+1008,1020,Rear Hook
+1045,1050,Jab
+1050,1061,Rear Uppercut
+1076,1089,Lead Hook
+1188,1194,Jab
+1194,1199,Cross
+1199,1211,Lead Uppercut
+1233,1238,Jab
+1238,1247,Rear Uppercut
+1280,1287,Jab
+1287,1292,Cross
+1292,1302,Lead Uppercut
+1315,1334,Lead Hook
+1351,1356,Jab
+1356,1361,Cross
+1361,1371,Lead Hook
+1375,1396,Rear Uppercut

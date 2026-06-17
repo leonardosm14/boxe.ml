@@ -13,3 +13,12 @@ norm_stats_3.npz
 outputs/_smoke.mp4
 annotate/adam_clean.mp4
 annotate/annotate_pub.html
+
+# artefatos desta sessao (nao versionar)
+.DS_Store
+*.task
+conf_*.npy
+labels_*.npy
+boxvi_feats.npz
+ruy.mp4
+outputs/*.mp4
