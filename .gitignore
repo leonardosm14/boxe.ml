@@ -8,3 +8,8 @@ best_*
 _*.py
 _*.sh
 __temp__*
+modelo_boxe_3class.keras
+norm_stats_3.npz
+outputs/_smoke.mp4
+annotate/adam_clean.mp4
+annotate/annotate_pub.html

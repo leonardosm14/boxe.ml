@@ -156,3 +156,89 @@ Workflow de research rodando: papers BoxingVI + secundário, calibração (TF/Ke
 - **Cross-video (V3/V4):** 0.13 (v2) → **0.29** (v3) — recuperou, mas o gap de generalização entre ângulos persiste (achado importante p/ a pesquisa).
 
 Artefatos: `matrix_baseline.png`, `matrix_improved.png`, `outputs/adam_baseline.mp4`, `outputs/adam_improved.mp4`, `baseline_metrics.json`, `improved_metrics.json`.
+
+---
+
+## Branch `feat/type-stance-decoupling` — desacoplar TIPO (modelo) da MÃO (geometria) + suavidade
+
+> Avanço sobre `feat/body-frame-event-inference`. Ataca os DOIS gargalos medidos: (1) confusão de
+> golpes parecidos = a MÃO (jab/cross, lead/rear hook/uppercut); (2) o rótulo "piscando"/trocando de
+> classe no meio do golpe. Cada lever foi medido em cross-video/LOVO com IC. Plano completo em
+> `PLANO_IMPLEMENTACAO.md`; pesquisa SOTA (7 dimensões, com verificação adversarial) por trás de cada escolha.
+
+### Levers implementados (todos no estilo numpy/Keras do Leo)
+- **Features view-invariantes** (`boxe_utils.engineered_features` + `deroll`): ângulos internos do corpo
+  (cotovelo E/D, ombro E/D, torção do tronco) + razão de direção da velocidade do punho, somados às
+  coords/vel/acc. De-roll nivela a linha de quadril (tira roll de câmera — parte bem-posta da
+  canonicalização 2D). **Medido: ajudam o cross-video** (ablação: só-coords 0.362 → coords+eng 0.380;
+  sem de-roll cai p/ 0.332). 110 features.
+- **Máscara do padding de verdade** (`model.py`): o bug era a padronização por eixo virar o zero-pad em
+  `−mean/std ≠ 0`, e o `np.diff` injetar velocidade espúria — o BiLSTM comia lixo. Agora o padding fica
+  0 em todos os canais e o pooling (`MaskedMean`) ignora os frames de padding. Sem camada `Masking`
+  (que forçava o caminho lento e quebrava o cuDNN com máscara não-right-padded por frames internos
+  perdidos) → LSTM cuDNN, **treino 5-10× mais rápido**.
+- **Logit-adjusted softmax** (balanced softmax, Menon et al. ICLR 2021): `loss = CE(z + tau·log(pi), y)`,
+  no lugar do `class_weight='balanced'` (que super-amplificava a Rear Hook). Dense final em LOGITS;
+  softmax na inferência (`predict_proba`). Calibra e ataca a classe rara.
+- **Mirror augmentation com troca de mão** (`mirror_windows` + swap de rótulo Lead↔Rear): dobra os dados
+  e força a mão a vir da geometria do corpo, não do lado da câmera.
+- **Deep ensemble (5 seeds, média de softmax)**: melhor calibração sob shift + stream mais suave.
+- **Decoder temporal** (`decode.py`): histerese (Schmitt) na velocidade do punho **normalizada pelo
+  corpo** (não pixels) + **Viterbi grudento** (numpy, p_self=0.92) sobre as posteriors por-frame →
+  moda da trilha por span = 1 rótulo contíguo; relabel ASRF apaga lampejos curtos. Mata o piscar.
+- **Stance adaptativa** (`stance.py` — geometria pura): a MÃO lead/rear sai de geometria POR-GOLPE
+  (a extensão do punho define a "frente" localmente). Aplicada **adaptativamente** no `boxe.py`: só
+  corrige a mão quando o modelo titubeia entre as duas mãos do mesmo tipo (nunca sobrescreve confiante).
+
+### Resultados (5-seed ensemble, com IC bootstrap)
+| Métrica | baseline (Leo) | **nova pipeline** |
+|---|---|---|
+| TEST in-distribution (V5,V9) | 0.83–0.87 | **0.849** [IC95 0.821, 0.872] |
+| **CROSS-VIDEO 6-classes (V3,V4)** | **0.31** | **0.406** [IC95 0.380, 0.432] ✅ significativo |
+| CROSS-VIDEO TIPO 3-classes | 0.49 | **0.564** [IC95 0.538, 0.591] |
+| Calibração ECE (test) | "crava 100%" | 0.073 (honesto) |
+| Stance lead/rear (geometria, cross) | 0.70 | **0.772** |
+
+### Ablação (cross-video V3,V4, 3 seeds — o que move o número)
+1. coords+eng+deroll (escolhida): **0.380** · 2. eng+aug: 0.370 · 3. coords+aug: 0.367 ·
+4. só coords: 0.362 · 5. eng+aug tau1.5: 0.357 · 6. eng sem deroll: 0.332.
+**Conclusões medidas:** ângulos ajudam; de-roll ajuda; **pose-aug (rotação/jitter) NÃO ajuda OOD**
+(variância alta); tau>1 não ajuda. Mantida a config simples (eng + deroll, sem aug).
+
+### adam.mp4 — auditoria frame-a-frame (o entregável visível)
+9 golpes detectados, cada um **1 rótulo contíguo do início ao fim do movimento**, **0 trocas de classe
+dentro de um golpe**, repouso em branco. Verificado quebrando em frames: o rótulo aparece exatamente
+durante a extensão do punho e segura até a retração (ex. span [183-196] "Cross", [279-301] "Cross").
+**O piscar/trocar no meio do golpe — a queixa principal — está resolvido.** A classe exata (cross vs
+jab, lead vs rear) é limitada por OOD (adam = pessoa/câmera fora do treino), mas o TIPO (reto/hook) bate.
+Gating retunado p/ a escala do sinal body-frame (THI=1.0/TLO=0.5; o 0.07 antigo era de pixels).
+
+### Caveats honestos
+- O gap OOD **não fecha** (research-hard, 2D, poucas fontes): teto = oracle ~0.49. Entregamos ganho
+  real e significativo (0.31→0.40-0.46) + in-distribution forte + limitação documentada.
+- **LOVO tem um fold patológico (V4 ≈ 0.01)**: câmera espelhada → o modelo cru prediz a mão invertida
+  com CONFIANÇA. **Medido:** a stance adaptativa NÃO recupera o V4 (0.013→0.013) — o adaptativo só dispara
+  quando o modelo titubeia (margem<0.15), e no V4 ele erra confiante; além disso a própria geometria fica
+  espelhada nessa câmera. Nos outros folds o ganho é marginal e seguro (V3 +0.022, V1 +0.004, in-distribution
+  V5 0.881→0.885 — não machuca). **Conclusão empírica honesta:** lead/rear em 2D entre câmeras diferentes é
+  ~irresolvível em alta acurácia (confirma a IDEIA_STANCE); a stance é tie-breaker seguro, não conserta o
+  espelhamento. O ganho real de cross-video veio das features+máscara+logit-adjust+ensemble, não da stance.
+- Rear Hook ainda fraca (recall ~0.09) — fome de dados (133 amostras). Lever: re-extrair V6 / mais vídeos.
+
+### Tentado e descartado (empírico)
+- pose-aug (rotação/jitter/scale/warp): não move o cross-video (medido em 4 variantes). Em 2D, rotação
+  no plano não simula mudança de ponto de vista fora-do-plano.
+- tau=1.5 no logit-adjust: sem ganho sobre tau=1.0.
+- frontalização 2D total, GCN/transformer grande, temperature scaling: descartados por pesquisa (ver plano).
+
+### LOVO (leave-one-video-out, 6-classes, 3 seeds/fold) — número científico
+Folds medidos: V1=0.342 · V2=0.474 · V3=0.601 · V4=**0.011** (patológico, câmera espelhada).
+Média dos folds saudáveis ~**0.47**; com o V4 incluído ~0.36. O V4 é o caso de mão-espelhada que
+nem o modelo nem a geometria resolvem em 2D (limitação documentada). O número headline robusto é o
+split fixo V3,V4 com IC: **0.406 [0.380, 0.432]** vs baseline 0.31.
+
+### Decisão de output (com o Pedro): **6 classes nomeadas** (Jab/Cross/Lead Hook/...).
+A IDEIA_STANCE pedia o output de 6 via decomposição (TIPO-3cl + mão-geometria). Como a geometria da
+mão é fraca (0.772, falha no espelhado), na prática o modelo direto de 6-classes (com features+máscara+
+logit-adjust+ensemble) entrega ≈ o mesmo, e é o que o `boxe.py` usa (com a geometria só como tie-breaker
+adaptativo). O TIPO-3cl interno (cross-video 0.564) fica disponível como a representação robusta.

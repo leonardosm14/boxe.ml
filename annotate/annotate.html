@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Anotação de golpes — adam (ground truth)</title>
+<style>
+  :root { --bg:#0f1115; --pan:#181b22; --ln:#262b36; --tx:#e6e9ef; --mut:#8b93a3;
+          --acc:#4ade80; --warn:#f59e0b; --red:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx); font:14px/1.5 ui-sans-serif,system-ui,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:18px; display:grid; grid-template-columns:1fr 360px; gap:18px; }
+  h1 { font-size:16px; margin:0 0 4px; grid-column:1/-1; }
+  .sub { color:var(--mut); grid-column:1/-1; margin:-6px 0 6px; }
+  .vidbox { background:#000; border:1px solid var(--ln); border-radius:10px; overflow:hidden; position:relative; }
+  video { width:100%; display:block; }
+  .hud { position:absolute; top:8px; left:8px; background:rgba(0,0,0,.65); padding:6px 10px; border-radius:8px; font-variant-numeric:tabular-nums; }
+  .hud b { color:var(--acc); }
+  .state { position:absolute; top:8px; right:8px; padding:6px 10px; border-radius:8px; font-weight:600; }
+  .state.idle { background:#23303f; color:var(--mut); }
+  .state.mark { background:#5a3a08; color:var(--warn); }
+  .ctrls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  button { background:var(--pan); color:var(--tx); border:1px solid var(--ln); border-radius:8px; padding:8px 12px; cursor:pointer; font:inherit; }
+  button:hover { border-color:#3a4452; background:#20242d; }
+  button.acc { background:#16351f; border-color:#1f5a30; color:var(--acc); }
+  .rate { color:var(--mut); }
+  .panel { background:var(--pan); border:1px solid var(--ln); border-radius:10px; padding:14px; }
+  .legend { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:8px 0; }
+  .legend div { background:#1d212a; border:1px solid var(--ln); border-radius:6px; padding:6px 8px; font-size:13px; }
+  .legend kbd { background:#0b0d11; border:1px solid var(--ln); border-radius:4px; padding:1px 6px; margin-right:6px; color:var(--acc); }
+  table { width:100%; border-collapse:collapse; margin-top:8px; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--ln); font-size:13px; }
+  th { color:var(--mut); font-weight:600; }
+  td .x { color:var(--red); cursor:pointer; }
+  .ovl { position:absolute; inset:0; background:rgba(0,0,0,.78); display:none; align-items:center; justify-content:center; }
+  .ovl.show { display:flex; }
+  .pick { background:var(--pan); border:1px solid var(--ln); border-radius:12px; padding:18px; width:420px; }
+  .pick h3 { margin:0 0 10px; }
+  .pickgrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .pickgrid button { text-align:left; }
+  .big { font-size:15px; }
+  .row { display:flex; gap:8px; }
+  .muted { color:var(--mut); font-size:12px; }
+  .ok { color:var(--acc); }
+  .ref { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px; }
+  .ref figure { margin:0; background:#14171e; border:1px solid var(--ln); border-radius:8px; overflow:hidden; }
+  .ref img { width:100%; display:block; }
+  .ref figcaption { padding:5px 6px; font-size:11.5px; line-height:1.35; }
+  .ref figcaption b { color:var(--acc); }
+  details summary { user-select:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Anotação de golpes — adam.mp4 <span class="muted">(ground truth p/ medir o modelo)</span></h1>
+  <p class="sub">Espaço = marca <b>início</b> do golpe; espaço de novo = marca <b>fim</b> e abre a escolha do golpe (teclas 1–6). ←/→ anda 1 frame, Shift+←/→ anda 5. Vídeo a 25fps (498 frames).</p>
+
+  <div>
+    <div class="vidbox">
+      <video id="v" src="adam_clean.mp4" preload="auto"></video>
+      <div class="hud">frame <b id="fr">0</b> / <span id="total">497</span> &nbsp;·&nbsp; <span id="tm">0.00</span>s</div>
+      <div id="st" class="state idle">ocioso</div>
+      <div id="ovl" class="ovl">
+        <div class="pick">
+          <h3>Qual golpe? <span class="muted" id="pickrange"></span></h3>
+          <div class="pickgrid">
+            <button data-c="Jab"><kbd>1</kbd> Jab</button>
+            <button data-c="Cross"><kbd>2</kbd> Cross</button>
+            <button data-c="Lead Hook"><kbd>3</kbd> Lead Hook</button>
+            <button data-c="Lead Uppercut"><kbd>4</kbd> Lead Uppercut</button>
+            <button data-c="Rear Hook"><kbd>5</kbd> Rear Hook</button>
+            <button data-c="Rear Uppercut"><kbd>6</kbd> Rear Uppercut</button>
+          </div>
+          <p class="muted" style="margin:10px 0 0">Esc cancela este golpe.</p>
+        </div>
+      </div>
+    </div>
+    <div class="ctrls">
+      <button id="play">▶ / ⏸ (k)</button>
+      <button data-rate="0.25">0.25×</button>
+      <button data-rate="0.5">0.5×</button>
+      <button data-rate="1">1×</button>
+      <span class="rate">velocidade: <b id="rateNow">0.5×</b></span>
+      <button id="markBtn" class="acc">⎵ marcar início/fim</button>
+      <input type="file" id="vfile" accept="video/*" style="display:none">
+      <button id="openBtn">📂 abrir outro vídeo</button>
+      <span class="rate">fps: <input id="fpsIn" type="number" value="25" min="1" max="120" style="width:56px;background:#0b0d11;color:var(--tx);border:1px solid var(--ln);border-radius:6px;padding:4px 6px;font:inherit"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content:space-between; align-items:center">
+      <b>Golpes anotados: <span id="cnt" class="ok">0</span></b>
+      <div class="row">
+        <button id="copy">copiar CSV</button>
+        <button id="dl" class="acc">baixar CSV</button>
+      </div>
+    </div>
+    <div class="legend">
+      <div><kbd>1</kbd>Jab</div><div><kbd>2</kbd>Cross</div>
+      <div><kbd>3</kbd>Lead Hook</div><div><kbd>4</kbd>Lead Upp</div>
+      <div><kbd>5</kbd>Rear Hook</div><div><kbd>6</kbd>Rear Upp</div>
+    </div>
+    <details open style="margin-top:10px">
+      <summary style="cursor:pointer; color:var(--mut)">📖 referência dos golpes (clica pra esconder)</summary>
+      <div class="ref">
+        <figure><img src="ref_jab.png"><figcaption><b>1 Jab</b><br>reto · mão da FRENTE</figcaption></figure>
+        <figure><img src="ref_cross.png"><figcaption><b>2 Cross</b><br>reto · mão de TRÁS</figcaption></figure>
+        <figure><img src="ref_leadhook.png"><figcaption><b>3 Lead Hook</b><br>gancho lateral · FRENTE</figcaption></figure>
+        <figure><img src="ref_leaduppercut.png"><figcaption><b>4 Lead Upp</b><br>de baixo p/ cima · FRENTE</figcaption></figure>
+        <figure><img src="ref_rearhook.png"><figcaption><b>5 Rear Hook</b><br>gancho lateral · TRÁS</figcaption></figure>
+        <figure><img src="ref_rearuppercut.png"><figcaption><b>6 Rear Upp</b><br>de baixo p/ cima · TRÁS</figcaption></figure>
+      </div>
+      <p class="muted" style="margin:6px 0 0">
+        <b>FRENTE (lead) vs TRÁS (rear)</b> = mão do mesmo lado do pé que está na frente.
+        Destro (ortodoxo) = pé/mão esquerda na frente → <b>esquerda = frente</b>. Reto=Jab/Cross,
+        gancho lateral=Hook, de baixo p/ cima=Uppercut. <i>(fotos: BoxingVI, sujeito S1)</i>
+      </p>
+    </details>
+    <table>
+      <thead><tr><th>#</th><th>início</th><th>fim</th><th>golpe</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="muted">CSV: <code>start_frame,end_frame,class</code> (mesmo formato do dataset). Salva como <b>adam_gt.csv</b> na pasta do projeto e me avisa.</p>
+  </div>
+</div>
+
+<script>
+let FPS = 25;
+const v = document.getElementById('v');
+const fr = document.getElementById('fr'), tm = document.getElementById('tm');
+const total = document.getElementById('total');
+const fpsIn = document.getElementById('fpsIn'), vfile = document.getElementById('vfile');
+const st = document.getElementById('st'), ovl = document.getElementById('ovl');
+const rows = document.getElementById('rows'), cnt = document.getElementById('cnt');
+const rateNow = document.getElementById('rateNow'), pickrange = document.getElementById('pickrange');
+let marking = false, startF = null, anns = [];
+v.playbackRate = 0.5;
+
+const frame = () => Math.round(v.currentTime * FPS);
+function tick(){ fr.textContent = frame(); tm.textContent = v.currentTime.toFixed(2); requestAnimationFrame(tick); }
+tick();
+
+function setState(){
+  if (marking){ st.className='state mark'; st.textContent='⬤ marcando… (espaço = fim)'; }
+  else { st.className='state idle'; st.textContent='ocioso'; }
+}
+function mark(){
+  if (ovl.classList.contains('show')) return;
+  if (!marking){ marking=true; startF=frame(); setState(); }
+  else { marking=false; setState(); openPick(startF, frame()); }
+}
+function openPick(a,b){
+  const lo=Math.min(a,b), hi=Math.max(a,b);
+  ovl.dataset.lo=lo; ovl.dataset.hi=hi;
+  pickrange.textContent=`(frames ${lo}–${hi})`;
+  ovl.classList.add('show'); v.pause();
+}
+function commit(cls){
+  anns.push({s:+ovl.dataset.lo, e:+ovl.dataset.hi, c:cls});
+  anns.sort((p,q)=>p.s-q.s);
+  ovl.classList.remove('show'); render();
+}
+function render(){
+  cnt.textContent = anns.length;
+  rows.innerHTML = anns.map((a,i)=>`<tr><td>${i+1}</td><td>${a.s}</td><td>${a.e}</td><td>${a.c}</td>`+
+    `<td><span class="x" data-i="${i}">✕</span></td></tr>`).join('');
+}
+function csv(){ return 'start_frame,end_frame,class\n'+anns.map(a=>`${a.s},${a.e},${a.c}`).join('\n')+'\n'; }
+
+document.addEventListener('keydown', e=>{
+  if (ovl.classList.contains('show')){
+    if (e.key==='Escape'){ ovl.classList.remove('show'); }
+    const m={'1':'Jab','2':'Cross','3':'Lead Hook','4':'Lead Uppercut','5':'Rear Hook','6':'Rear Uppercut'};
+    if (m[e.key]) commit(m[e.key]);
+    e.preventDefault(); return;
+  }
+  if (e.code==='Space'){ mark(); e.preventDefault(); }
+  else if (e.key==='k'){ v.paused?v.play():v.pause(); e.preventDefault(); }
+  else if (e.key==='ArrowLeft'){ v.pause(); v.currentTime -= (e.shiftKey?5:1)/FPS; e.preventDefault(); }
+  else if (e.key==='ArrowRight'){ v.pause(); v.currentTime += (e.shiftKey?5:1)/FPS; e.preventDefault(); }
+});
+function updTotal(){ if(isFinite(v.duration)) total.textContent = Math.round(v.duration*FPS); }
+v.addEventListener('loadedmetadata', updTotal);
+fpsIn.onchange=()=>{ FPS = +fpsIn.value||25; updTotal(); };
+document.getElementById('openBtn').onclick=()=>vfile.click();
+vfile.onchange=e=>{ const f=e.target.files[0]; if(!f) return;
+  v.src=URL.createObjectURL(f); anns=[]; marking=false; render(); setState();
+  v.addEventListener('loadedmetadata',()=>{ v.playbackRate=+rateNow.textContent||0.5; updTotal(); },{once:true}); };
+document.getElementById('play').onclick=()=>v.paused?v.play():v.pause();
+document.getElementById('markBtn').onclick=mark;
+document.querySelectorAll('[data-rate]').forEach(b=>b.onclick=()=>{ v.playbackRate=+b.dataset.rate; rateNow.textContent=b.dataset.rate+'×'; });
+ovl.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>commit(b.dataset.c));
+rows.addEventListener('click', e=>{ if(e.target.classList.contains('x')){ anns.splice(+e.target.dataset.i,1); render(); }});
+document.getElementById('copy').onclick=()=>navigator.clipboard.writeText(csv()).then(()=>alert('CSV copiado!'));
+document.getElementById('dl').onclick=()=>{
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv()],{type:'text/csv'}));
+  a.download='adam_gt.csv'; a.click();
+};
+setState();
+</script>
+</body>
+</html>

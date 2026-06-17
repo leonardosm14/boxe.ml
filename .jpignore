@@ -1,0 +1,6 @@
+_*.py
+_*.sh
+__temp__*
+__pycache__/
+*.pyc
+.git/

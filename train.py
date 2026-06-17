@@ -1,41 +1,47 @@
-"""
-Treino do classificador de golpes (gera modelo_boxe.keras + norm_stats.npz).
+"""Treino do classificador de golpes (gera modelo_boxe.keras + norm_stats.npz).
 
-Diferenças vs a versão inicial (ver MUDANCAS.md):
-  - Normalização RELATIVA AO CORPO (recentro no quadril + escala de ombro) — features
-    invariantes a posição/escala/câmera. Foi o que melhorou same-source E cross-video.
-  - label smoothing (calibra a confiança, mata o "crava 100%").
-  - mirror augmentation no referencial do corpo (espelha x + troca juntas e rótulos Lead<->Rear).
-  - ReduceLROnPlateau corrigido; seed fixo; validação estratificada do treino.
-  - Avaliação reportando TEST (V5,V9) E CROSS-VIDEO (V3,V4) com pisos majoritário/aleatório.
-
-A pipeline de features (corpo -> padronização por eixo -> vel/acc) é a mesma de boxe.py
-(boxe_utils.preprocess_windows), garantindo treino == inferência.
+Pipeline nova (ver PLANO_IMPLEMENTACAO.md), tudo medido em cross-video/LOVO:
+  - features view-invariantes (de-roll + ângulos internos + razão de direção) — boxe_utils
+  - máscara do padding de verdade (pooling só nos frames reais) — model.py
+  - logit-adjusted softmax (balanced softmax) p/ a Rear Hook faminta — model.py
+  - mirror augmentation com troca de mão (Lead<->Rear) — boxe_utils.mirror_windows
+  - deep ensemble (média de softmax) p/ calibração sob shift
+A pipeline de features é a MESMA do boxe.py (boxe_utils.feature_pipeline): treino == inferência.
 """
+from gpupick import pick_and_set_gpu
+pick_and_set_gpu()
 import os
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import (Bidirectional, LSTM, Dense, Dropout, MultiHeadAttention,
-                                      GlobalAveragePooling1D, Input, Add, LayerNormalization)
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from sklearn.metrics import classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from collections import Counter
-from boxe_utils import (load_video, build_label_mapping, body_frame_windows,
-                        add_velocity_and_acceleration, WINDOW_LEN)
 
-tf.keras.utils.set_random_seed(42)
+from boxe_utils import (load_video, axis_stats, feature_pipeline, mirror_windows, augment_pose,
+                        WINDOW_LEN)
+from model import build_model, compile_model, predict_proba, predict_proba_ensemble, log_prior
+import eval_utils
+
 for g in tf.config.list_physical_devices("GPU"):
     tf.config.experimental.set_memory_growth(g, True)
 
+CLASSES = ["Cross", "Jab", "Lead Hook", "Lead Uppercut", "Rear Hook", "Rear Uppercut"]
+LID = {c: i for i, c in enumerate(CLASSES)}
+# espelho troca a MÃO (mesmo TIPO): Cross<->Jab, Lead Hook<->Rear Hook, Lead Upp<->Rear Upp
+SWAP_L = [("Cross", "Jab"), ("Lead Hook", "Rear Hook"), ("Lead Uppercut", "Rear Uppercut")]
+SWAP_ID = np.arange(len(CLASSES))
+for a, b in SWAP_L:
+    SWAP_ID[LID[a]] = LID[b]; SWAP_ID[LID[b]] = LID[a]
+
+# colapso para o TIPO (3 classes): reto / hook / uppercut
+TYPE_OF = {"Cross": 0, "Jab": 0, "Lead Hook": 1, "Rear Hook": 1, "Lead Uppercut": 2, "Rear Uppercut": 2}
+TYPE_NAMES = ["reto", "hook", "uppercut"]
+
 TRAIN_VIDS = ["V1", "V2", "V7", "V8"]
-CV_VIDS = ["V3", "V4"]       # cross-video (held-out) — só para reportar generalização
+CV_VIDS = ["V3", "V4"]       # cross-video (held-out) — generalização OOD
 TEST_VIDS = ["V5", "V9"]     # test (held-out, same-source)
 
 
@@ -43,109 +49,113 @@ def load_concat(vids):
     Xs, ys = [], []
     for v in vids:
         sk, lb = load_video(v)
-        Xs.append(sk.astype(np.float32)); ys.append(lb)
+        Xs.append(sk.reshape(-1, WINDOW_LEN, 17, 2).astype(np.float32))
+        ys.append(lb)
     return np.concatenate(Xs), np.concatenate(ys)
 
 
-X_tr_all, y_tr_all = load_concat(TRAIN_VIDS)
-X_cv, y_cv_raw = load_concat(CV_VIDS)
-X_te, y_te_raw = load_concat(TEST_VIDS)
-
-classes, label_to_id, id_to_label = build_label_mapping(y_tr_all)
-num_classes = len(classes)
-y_tr_all_id = np.array([label_to_id[x] for x in y_tr_all])
-y_cv = np.array([label_to_id.get(x, -1) for x in y_cv_raw])
-y_te = np.array([label_to_id.get(x, -1) for x in y_te_raw])
-
-tr_i, val_i = train_test_split(np.arange(len(y_tr_all_id)), test_size=0.15,
-                               stratify=y_tr_all_id, random_state=42)
-X_tr, y_tr = X_tr_all[tr_i], y_tr_all_id[tr_i]
-X_val, y_val = X_tr_all[val_i], y_tr_all_id[val_i]
+def labels_to_ids(raw, type3=False):
+    if type3:
+        return np.array([TYPE_OF[x] for x in raw])
+    return np.array([LID[x] for x in raw])
 
 
-def axis_stats(X):
-    """Média/desvio por eixo (x,y) no referencial do corpo, só nos valores não-nulos."""
-    B = body_frame_windows(X); x, y = B[..., 0], B[..., 1]
-    return (np.array([x[x != 0].mean(), y[y != 0].mean()], np.float32),
-            np.array([x[x != 0].std() + 1e-6, y[y != 0].std() + 1e-6], np.float32))
+def make_train_set(Xtr_raw, ytr_id, mean, std, type3, aug_cfg, seed, feat_cfg):
+    """Conjunto de treino = original + espelho (troca de mão no 6-classes; rótulo
+    preservado no TIPO) [+ cópias com pose-noise se aug_cfg ativo]. Tudo passa pela
+    MESMA feature_pipeline."""
+    rng = np.random.default_rng(seed)
+    swap = (np.arange(3) if type3 else SWAP_ID)   # TIPO: espelho preserva o rótulo
+
+    blocks_X = [feature_pipeline(Xtr_raw, mean, std, **feat_cfg)]
+    blocks_y = [ytr_id]
+    # espelho
+    Xm = mirror_windows(Xtr_raw)
+    blocks_X.append(feature_pipeline(Xm, mean, std, **feat_cfg))
+    blocks_y.append(swap[ytr_id])
+    # pose-noise (opcional): augmenta original e espelho
+    if aug_cfg:
+        Xa = augment_pose(Xtr_raw, rng, **aug_cfg)
+        blocks_X.append(feature_pipeline(Xa, mean, std, **feat_cfg)); blocks_y.append(ytr_id)
+        Xma = augment_pose(Xm, rng, **aug_cfg)
+        blocks_X.append(feature_pipeline(Xma, mean, std, **feat_cfg)); blocks_y.append(swap[ytr_id])
+    return np.concatenate(blocks_X), np.concatenate(blocks_y)
 
 
-mean, std = axis_stats(X_tr)
-np.savez("norm_stats.npz", mean=mean, std=std)   # carregado por boxe.py (treino == inferência)
-
-SWAP_J = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)]
-SWAP_L = [("Cross", "Jab"), ("Lead Hook", "Rear Hook"), ("Lead Uppercut", "Rear Uppercut")]
-swap_id = np.arange(num_classes)
-for a, b in SWAP_L:
-    swap_id[label_to_id[a]] = label_to_id[b]; swap_id[label_to_id[b]] = label_to_id[a]
-
-
-def flip_body(B):
-    """Espelho horizontal no referencial do corpo: nega x + troca juntas esquerda<->direita."""
-    F = B.copy(); F[..., 0] *= -1
-    for a, b in SWAP_J:
-        t = F[:, :, a, :].copy(); F[:, :, a, :] = F[:, :, b, :]; F[:, :, b, :] = t
-    return F
-
-
-def std_va(B):
-    X = B.reshape(len(B), WINDOW_LEN, 34).copy()
-    X[:, :, 0::2] = (X[:, :, 0::2] - mean[0]) / std[0]
-    X[:, :, 1::2] = (X[:, :, 1::2] - mean[1]) / std[1]
-    return add_velocity_and_acceleration(X)
-
-
-def feats(X):
-    return std_va(body_frame_windows(X))
-
-
-B_tr = body_frame_windows(X_tr)
-X_tr_feat = np.concatenate([std_va(B_tr), std_va(flip_body(B_tr))])   # original + espelhado
-y_tr_final = np.concatenate([y_tr, swap_id[y_tr]])
-X_val_feat, X_cv_feat, X_te_feat = feats(X_val), feats(X_cv), feats(X_te)
+def train_ensemble(Xtr_raw, ytr_id, mean, std, n_classes, *, type3=False, tau=1.0,
+                   label_smoothing=0.05, seeds=(42,), aug_cfg=None, feat_cfg=None,
+                   epochs=80, verbose=0):
+    """Treina um ensemble (1 modelo por seed). Cada modelo: split estratificado interno
+    p/ early-stop, features original+espelho(+aug), loss logit-adjusted. Retorna a lista."""
+    feat_cfg = feat_cfg or {}
+    models = []
+    for seed in seeds:
+        tf.keras.utils.set_random_seed(int(seed))
+        tr_i, val_i = train_test_split(np.arange(len(ytr_id)), test_size=0.15,
+                                       stratify=ytr_id, random_state=int(seed))
+        Xtr_b, ytr_b = make_train_set(Xtr_raw[tr_i], ytr_id[tr_i], mean, std, type3, aug_cfg, seed, feat_cfg)
+        Xval = feature_pipeline(Xtr_raw[val_i], mean, std, **feat_cfg)
+        yval = ytr_id[val_i]
+        log_pi = log_prior(ytr_b, n_classes)
+        mdl = build_model((WINDOW_LEN, Xtr_b.shape[-1]), n_classes)
+        compile_model(mdl, log_pi, tau=tau, label_smoothing=label_smoothing)
+        cbs = [EarlyStopping(monitor="val_acc", patience=15, restore_best_weights=True, mode="max"),
+               ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, mode="min")]
+        h = mdl.fit(Xtr_b, tf.keras.utils.to_categorical(ytr_b, n_classes),
+                    validation_data=(Xval, tf.keras.utils.to_categorical(yval, n_classes)),
+                    epochs=epochs, batch_size=32, callbacks=cbs, verbose=verbose)
+        # print por seed: mantém a sessão jp run viva (silêncio longo a desconecta) + informa
+        va = max(h.history.get("val_acc", [0]))
+        print(f"   seed {seed}: val_acc={va:.3f} ({len(h.history['loss'])} épocas)", flush=True)
+        models.append(mdl)
+    return models
 
 
-def build_model(input_shape, nc):
-    i = Input(shape=input_shape)
-    x = Bidirectional(LSTM(64, return_sequences=True, dropout=0.3, recurrent_dropout=0.2))(i)
-    x = Dropout(0.3)(x)
-    a = MultiHeadAttention(num_heads=2, key_dim=32)(x, x)
-    x = Add()([x, a]); x = LayerNormalization()(x)
-    x = GlobalAveragePooling1D()(x)
-    x = Dense(64, activation="relu", kernel_regularizer=l2(0.0005))(x); x = Dropout(0.3)(x)
-    return Model(i, Dense(nc, activation="softmax")(x))
+def report(name, models, Xraw, y_ids, mean, std, n_classes, target_names, feat_cfg=None):
+    """Imprime acc (com IC bootstrap), macro-F1, ECE e pisos para um split."""
+    feat_cfg = feat_cfg or {}
+    keep = y_ids >= 0
+    X = feature_pipeline(Xraw[keep], mean, std, **feat_cfg)
+    probs = predict_proba_ensemble(models, X)
+    yp = probs.argmax(1); yt = y_ids[keep]
+    acc, lo, hi = eval_utils.bootstrap_ci(yt, yp)
+    mf1 = f1_score(yt, yp, average="macro")
+    e = eval_utils.ece(probs, yt)
+    maj, ale = eval_utils.floors(yt)
+    print(f"=== {name}: acc={acc:.3f} [IC95 {lo:.3f},{hi:.3f}] macroF1={mf1:.3f} ECE={e:.3f} "
+          f"| pisos maj={maj:.3f} aleat={ale:.3f} | n={len(yt)}")
+    return yp, yt, probs
 
 
-model = build_model((25, 102), num_classes)
-model.compile(optimizer=tf.keras.optimizers.Adam(5e-4),
-              loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1), metrics=["accuracy"])
-weights = compute_class_weight("balanced", classes=np.unique(y_tr_final), y=y_tr_final)
-class_weights = dict(enumerate(weights))
-y_tr_oh = tf.keras.utils.to_categorical(y_tr_final, num_classes)
-y_val_oh = tf.keras.utils.to_categorical(y_val, num_classes)
-callbacks = [
-    EarlyStopping(monitor="val_accuracy", patience=15, restore_best_weights=True, mode="max"),
-    ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, mode="min", verbose=0),
-    ModelCheckpoint("best_model.keras", monitor="val_accuracy", mode="max", save_best_only=True, verbose=0),
-]
-model.fit(X_tr_feat, y_tr_oh, validation_data=(X_val_feat, y_val_oh), epochs=100, batch_size=32,
-          class_weight=class_weights, callbacks=callbacks, verbose=2)
-best = load_model("best_model.keras")
+def main():
+    Xtr_raw, ytr_raw = load_concat(TRAIN_VIDS)
+    Xcv_raw, ycv_raw = load_concat(CV_VIDS)
+    Xte_raw, yte_raw = load_concat(TEST_VIDS)
+    mean, std = axis_stats(Xtr_raw)
+    np.savez("norm_stats.npz", mean=mean, std=std)
+
+    # ----- 6 classes -----
+    ytr6 = labels_to_ids(ytr_raw); ycv6 = labels_to_ids(ycv_raw); yte6 = labels_to_ids(yte_raw)
+    seeds = (42, 7, 123, 2024, 99)
+    print("\n########## 6-CLASSES (features novas + logit-adjust + mirror + ensemble) ##########")
+    m6 = train_ensemble(Xtr_raw, ytr6, mean, std, 6, type3=False, tau=1.0, seeds=seeds)
+    report("TEST (V5,V9)", m6, Xte_raw, yte6, mean, std, 6, CLASSES)
+    yp, yt, _ = report("CROSS-VIDEO (V3,V4)", m6, Xcv_raw, ycv6, mean, std, 6, CLASSES)
+    print(classification_report(yt, yp, labels=list(range(6)), target_names=CLASSES, zero_division=0))
+
+    # ----- 3 classes (TIPO) -----
+    ytr3 = labels_to_ids(ytr_raw, True); ycv3 = labels_to_ids(ycv_raw, True); yte3 = labels_to_ids(yte_raw, True)
+    print("\n########## 3-CLASSES (TIPO: reto/hook/uppercut) ##########")
+    m3 = train_ensemble(Xtr_raw, ytr3, mean, std, 3, type3=True, tau=1.0, seeds=seeds)
+    report("TEST tipo (V5,V9)", m3, Xte_raw, yte3, mean, std, 3, TYPE_NAMES)
+    report("CROSS-VIDEO tipo (V3,V4)", m3, Xcv_raw, ycv3, mean, std, 3, TYPE_NAMES)
+
+    # salva o modelo 6-classes (ensemble: salva todos)
+    for k, m in enumerate(m6):
+        m.save(f"modelo_boxe_e{k}.keras")
+    m6[0].save("modelo_boxe.keras")
+    print("\nsalvo: modelo_boxe.keras (+ ensemble e0..e4) + norm_stats.npz")
 
 
-def report(name, Xf, y):
-    keep = y >= 0
-    yp = np.argmax(best.predict(Xf[keep], batch_size=512, verbose=0), axis=1); yt = y[keep]
-    acc = float((yp == yt).mean()); mf1 = float(f1_score(yt, yp, average="macro"))
-    maj = Counter(yt).most_common(1)[0][1] / len(yt)
-    print(f"=== {name}: acc={acc:.4f} macroF1={mf1:.4f} | piso majoritário={maj:.3f} aleatório={1/num_classes:.3f} | n={len(yt)}")
-    return yp, yt
-
-
-print("\n########## RESULTADOS ##########")
-report("TEST (V5,V9, same-source)", X_te_feat, y_te)
-report("CROSS-VIDEO (V3,V4, held-out)", X_cv_feat, y_cv)
-yp, yt = report("TEST detalhe", X_te_feat, y_te)
-print(classification_report(yt, yp, labels=list(range(num_classes)), target_names=classes, zero_division=0))
-best.save("modelo_boxe.keras")
-print("saved modelo_boxe.keras + norm_stats.npz")
+if __name__ == "__main__":
+    main()

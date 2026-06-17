@@ -1,12 +1,12 @@
+from gpupick import pick_and_set_gpu
+pick_and_set_gpu()
 import os
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# GPU configurável via ambiente (antes era fixo em "3", causava conflito no lab).
-# Definir antes de importar tensorflow/ultralytics para a visibilidade valer.
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", os.environ.get("GPU", "0"))
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 import argparse
+import glob
 import subprocess
 import cv2
 import numpy as np
@@ -14,121 +14,107 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 from ultralytics import YOLO
 
-from boxe_utils import make_window, preprocess_windows
+from boxe_utils import make_window, feature_pipeline, body_frame_windows, WINDOW_LEN
+from model import predict_proba_ensemble
+import decode
+import stance as st
 
 gpus = tf.config.list_physical_devices('GPU')
-if gpus:
+for gpu in gpus:
     try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
+        tf.config.experimental.set_memory_growth(gpu, True)
     except RuntimeError as e:
         print(f"GPU error: {e}")
 
 BOXING_CLASSES = ["Cross", "Jab", "Lead Hook", "Lead Uppercut", "Rear Hook", "Rear Uppercut"]
+WRIST = [9, 10]
+# TIPO -> (classe lead, classe rear). Usado na correção adaptativa da mão.
+TYPE_OF = {0: 0, 1: 0, 2: 1, 4: 1, 3: 2, 5: 2}           # id 6-classes -> tipo
+TYPE_PAIR = {0: (1, 0), 1: (2, 4), 2: (3, 5)}            # tipo -> (lead_id, rear_id)
 
-# Fallback caso norm_stats.npz não exista (mean/std por eixo, no referencial do corpo).
-X_MEAN_FALLBACK = np.array([0.0, 0.0], dtype=np.float32)
-X_STD_FALLBACK  = np.array([1.0, 1.0], dtype=np.float32)
-
-WRIST = [9, 10]      # COCO: punho esquerdo e direito
-
-# Inferência por SEGMENTO DE MOVIMENTO (não frame a frame, nem por pico). O dataset é
-# segmentado por golpe (start/end por linha), então a inferência também é: um golpe = uma
-# região contígua onde a velocidade do punho passa de SEG_THI e só termina quando cai
-# abaixo de SEG_TLO (Schmitt trigger / histerese). A histerese mantém o golpe inteiro
-# (windup -> impacto -> retração) como UM segmento -> 1 classificação -> 1 rótulo segurado
-# do início ao fim do golpe. Mata por construção: troca de classe no meio do golpe,
-# rótulo "sumindo", múltiplos rótulos por golpe, e o golpe-em-repouso.
-SEG_THI    = 0.070   # entra em "movimento" (limiar alto)
-SEG_TLO    = 0.040   # sai de "movimento" (limiar baixo) — a histerese segura o golpe contíguo
-SEG_GAP    = 5       # funde segmentos separados por <= GAP frames (dip de detecção no mesmo golpe)
-SEG_MINLEN = 5       # descarta segmentos < MINLEN frames (jitter, não é golpe)
-CONF_FLOOR = 0.30    # confiança média mínima do evento p/ exibir
-SPAN_POST  = 10      # frames após o impacto que o rótulo CONTINUA (cobre extensão + retração);
-                     # a velocidade do punho cai a ~0 na extensão, mas o golpe ainda é visível
+# Detecção POR PICO da velocidade do punho (body-frame). Histerese/Schmitt funde combos e
+# perde golpes leves; cada golpe é um pico local. Medido no adam: ~25 picos (find_peaks
+# prominence~0.4). Sinal body-frame: mediana ~0.39, picos >1.5. Ver _debug2.py.
+PEAK_PROM = 0.3      # proeminência mínima do pico (golpe) — pega golpes mais leves também
+PEAK_DIST = 7        # distância mínima entre golpes (frames)
+PEAK_FLOOR = 0.25    # span do golpe = região contígua acima desse piso ao redor do pico
+CONF_FLOOR = 0.25    # rejeita golpe ambíguo (conf no pico < 0.25)
+HAND_MARGIN = 0.15   # se |P(lead)-P(rear)| do mesmo tipo < margem -> usa geometria (adaptativo)
 
 
 def load_norm_stats():
-    """Carrega média/desvio salvos no treino (norm_stats.npz). Mantém treino e
-    inferência sincronizados — nunca hardcode."""
     if os.path.exists("norm_stats.npz"):
         s = np.load("norm_stats.npz")
-        mean, std = np.asarray(s["mean"], np.float32), np.asarray(s["std"], np.float32)
-        print(f"--> Norm stats (corpo, por eixo): mean={mean} std={std} (norm_stats.npz)")
-        return mean, std
+        return np.asarray(s["mean"], np.float32), np.asarray(s["std"], np.float32)
     print("--> Aviso: norm_stats.npz não encontrado; usando fallback")
-    return X_MEAN_FALLBACK, X_STD_FALLBACK
+    return np.array([0.0, 0.0], np.float32), np.array([1.0, 1.0], np.float32)
+
+
+def load_models(model_arg):
+    """Carrega o ensemble (modelo_boxe_e*.keras) se existir; senão o modelo único."""
+    ens = sorted(glob.glob("modelo_boxe_e*.keras"))
+    if ens:
+        print(f"--> Ensemble: {len(ens)} modelos ({', '.join(ens)})")
+        return [load_model(m) for m in ens]
+    print(f"--> Modelo único: {model_arg}")
+    return [load_model(model_arg)]
 
 
 def ensure_25fps(video_path):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
-
     if abs(fps - 25.0) < 0.1:
         print(f"--> Video already at {fps:.2f} FPS")
         return video_path
-
     output_dir = "25fps"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, os.path.basename(video_path))
-
     if os.path.exists(output_path):
-        print(f"--> 25 FPS version already exists: {output_path}")
         return output_path
-
-    print(f"--> Converting {fps:.2f} FPS video to 25 FPS...")
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vf", "fps=25", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", output_path,
-    ]
-    subprocess.run(cmd, check=True)
-    print(f"--> Saved 25 FPS video: {output_path}")
+    print(f"--> Converting {fps:.2f} FPS -> 25 FPS...")
+    subprocess.run(["ffmpeg", "-y", "-i", video_path, "-vf", "fps=25",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", output_path], check=True)
     return output_path
 
 
 def extract_skeletons(video_path):
     print(f"--> [1/3] Running YOLO-Pose: {video_path}")
     model_yolo = YOLO("yolov8m-pose.pt")
-
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    video_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    vw, vh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
-
-    skeletons_matrix = np.zeros((total_frames, 17, 2))
+    skeletons = np.zeros((total_frames, 17, 2))
     results = model_yolo.track(source=video_path, stream=True, device="cuda", conf=0.3)
-
-    for frame_idx, r in enumerate(results):
-        if frame_idx >= total_frames:
+    for i, r in enumerate(results):
+        if i >= total_frames:
             break
         if r.boxes is not None and r.keypoints is not None and len(r.keypoints.data) > 0:
             kp = r.keypoints.data[0].cpu().numpy()
-            if kp.shape[0] == 17:
-                confidences = kp[:, 2]
-                if confidences.mean() >= 0.5:
-                    coords_xy = kp[:, :2]
-                    coords_xy[:, 0] /= video_width
-                    coords_xy[:, 1] /= video_height
-                    skeletons_matrix[frame_idx] = coords_xy
-                    continue
-        if frame_idx > 0:
-            skeletons_matrix[frame_idx] = skeletons_matrix[frame_idx - 1]
-
+            if kp.shape[0] == 17 and kp[:, 2].mean() >= 0.5:
+                xy = kp[:, :2].copy()
+                xy[:, 0] /= vw; xy[:, 1] /= vh
+                skeletons[i] = xy
+                continue
+        if i > 0:
+            skeletons[i] = skeletons[i - 1]
     print("--> [2/3] Skeleton extraction complete.")
-    return skeletons_matrix
+    return skeletons
 
 
-def preprocess_window(window, mean, std):
-    """Normaliza UMA janela (25,17,2) pela pipeline compartilhada do boxe_utils
-    (referencial do corpo -> padronização por eixo -> vel/acc). Treino == inferência."""
-    return preprocess_windows(window[None], mean, std)
-
-
-def wrist_speed_signal(skeletons):
-    """Velocidade do punho dominante por frame (máx dos dois punhos), suavizada (5-tap)."""
-    d = np.diff(skeletons[:, WRIST, :], axis=0)
+def wrist_speed_bodyframe(skeletons):
+    """Velocidade do punho dominante NORMALIZADA pelo corpo (não em pixels). Recentra cada
+    frame no quadril médio e escala pela largura de ombro mediana do clipe -> comparável
+    entre câmeras/ângulos diferentes. Suavizada (5-tap)."""
+    sk = skeletons.astype(np.float32)
+    det = (sk != 0).any(axis=2)                          # (T,17)
+    mid_hip = (sk[:, 11, :] + sk[:, 12, :]) / 2.0
+    sw = np.linalg.norm(sk[:, 5, :] - sk[:, 6, :], axis=1)
+    scale = np.median(sw[sw > 1e-3]) if (sw > 1e-3).any() else 1.0
+    norm = (sk - mid_hip[:, None, :]) / max(scale, 1e-3)
+    norm = np.where(det[..., None], norm, 0.0)
+    d = np.diff(norm[:, WRIST, :], axis=0)
     spd = np.linalg.norm(d, axis=2).max(axis=1)
     spd = np.concatenate([[0.0], spd])
     k = 5
@@ -136,195 +122,149 @@ def wrist_speed_signal(skeletons):
     return spd
 
 
-def detect_events(skeletons):
-    """Segmenta por MOVIMENTO contínuo do punho (Schmitt trigger): entra em 'movimento'
-    quando a velocidade passa de SEG_THI e só sai quando cai abaixo de SEG_TLO. A histerese
-    captura o golpe inteiro (windup -> impacto -> retração) como UM segmento contíguo, então
-    1 rótulo cobre o golpe todo sem cortes. Funde dips curtos (mesmo golpe) e descarta
-    segmentos minúsculos (jitter). Retorna [(onset, peak, offset), ...] e o sinal."""
-    spd = wrist_speed_signal(skeletons)
+def per_frame_probs(skeletons, models, mean, std):
+    """Probabilidade 6-classes por frame. Para cada frame t monta a janela (real no início)
+    e classifica; frames sem janela ainda viram quase-uniforme (baixa confiança)."""
+    T = len(skeletons)
+    windows, idx = [], []
+    for t in range(T):
+        w = make_window(skeletons, t)
+        if w is not None:
+            windows.append(w); idx.append(t)
+    probs = np.full((T, 6), 1.0 / 6, dtype=np.float32)
+    if windows:
+        X = feature_pipeline(np.array(windows), mean, std)
+        p = predict_proba_ensemble(models, X)
+        for j, t in enumerate(idx):
+            probs[t] = p[j]
+    return probs
 
-    active, segs, start = False, [], 0
-    for i, v in enumerate(spd):
-        if not active and v >= SEG_THI:
-            active, start = True, i
-        elif active and v < SEG_TLO:
-            active = False
-            segs.append([start, i - 1])
-    if active:
-        segs.append([start, len(spd) - 1])
 
-    merged = []
-    for s in segs:
-        if merged and s[0] - merged[-1][1] <= SEG_GAP:   # mesmo golpe (dip curto)
-            merged[-1][1] = s[1]
-        else:
-            merged.append(list(s))
-
-    events = []
-    for on, off in merged:
-        if off - on + 1 < SEG_MINLEN:                    # jitter, não é golpe
+def label_punches(skeletons, probs, speed):
+    """Rotula POR PICO: cada pico da velocidade do punho = 1 golpe. Classifica no pico
+    (média do softmax de algumas janelas ancoradas), corrige a MÃO adaptativamente por
+    geometria quando o modelo titubeia, e pinta o span inteiro (onset->offset) com 1
+    rótulo contíguo. Repouso entre golpes = -1 (fundo)."""
+    spans = decode.detect_punches(speed, PEAK_PROM, PEAK_DIST, PEAK_FLOOR)
+    labels = np.full(len(skeletons), -1, dtype=np.int64)
+    for on, pk, off in spans:
+        avg = probs[max(0, pk - 2):pk + 3].mean(axis=0)     # softmax médio no pico
+        ci, conf = int(np.argmax(avg)), float(avg.max())
+        if conf < CONF_FLOOR:                               # golpe ambíguo -> ignora
             continue
-        peak = on + int(np.argmax(spd[on:off + 1]))      # frame de impacto (máx velocidade)
-        events.append((on, peak, off))
-    return events, spd
+        typ = TYPE_OF[ci]; lead_id, rear_id = TYPE_PAIR[typ]
+        if abs(avg[lead_id] - avg[rear_id]) < HAND_MARGIN:  # modelo incerto na mão
+            window = make_window(skeletons, pk)
+            if window is not None:
+                side = st.lead_rear(window)
+                ci = lead_id if side == "lead" else rear_id
+        labels[on:off + 1] = ci
+    return labels, spans
 
 
-def save_video_with_predictions(video_path, output_path, skeletons, model, mean, std):
-    print("--> [3/3] Segmenting punch motions...")
-    events, spd = detect_events(skeletons)
-    print(f"--> {len(events)} segmentos de movimento detectados (Schmitt trigger)")
+def _spans(labels):
+    """Spans contíguos com rótulo >= 0 (golpes), ignorando o fundo (-1)."""
+    spans, on = [], None
+    for i, v in enumerate(labels):
+        if v >= 0 and on is None:
+            on = i
+        elif v < 0 and on is not None:
+            spans.append((on, i - 1)); on = None
+    if on is not None:
+        spans.append((on, len(labels) - 1))
+    return spans
 
-    # Classifica cada evento UMA vez: média do softmax de 5 janelas ancoradas no pico
-    # (o pico é o instante de impacto/extensão, a fase que o modelo viu no treino).
-    X_batch, owner = [], []
-    for ei, (on, pk, off) in enumerate(events):
-        for p in range(pk - 2, pk + 3):
-            window = make_window(skeletons, p)
-            if window is None:
-                continue
-            X_batch.append(preprocess_window(window, mean, std))
-            owner.append(ei)
 
-    frame_label = [None] * len(skeletons)
-    n_shown = 0
-    n = len(skeletons)
-    if X_batch:
-        preds = model.predict(np.concatenate(X_batch), batch_size=512, verbose=1)
-        owner = np.array(owner)
-        for ei, (on, pk, off) in enumerate(events):
-            sel = preds[owner == ei]
-            if len(sel) == 0:
-                continue
-            avg = sel.mean(axis=0)                       # média das probs = 1 decisão por golpe
-            ci, conf = int(np.argmax(avg)), float(avg.max())
-            if conf < CONF_FLOOR:                        # rejeita evento ambíguo
-                continue
-            n_shown += 1
-            # rótulo do snap (onset) até o fim do follow-through (impacto + retração),
-            # sem invadir o próximo golpe -> o rótulo fica até o golpe acabar
-            end = max(off, pk + SPAN_POST)
-            if ei + 1 < len(events):
-                end = min(end, events[ei + 1][0] - 1)
-            end = min(end, n - 1)
-            for f in range(on, end + 1):
-                frame_label[f] = (ci, conf)               # 1 rótulo fixo no span do golpe
-    print(f"--> {n_shown} eventos exibidos após rejeição")
-
-    temp_output_path = "temp_raw_output.mp4"
+def render(video_path, output_path, skeletons, labels):
     cap = cv2.VideoCapture(video_path)
-    video_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    vw, vh = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
-
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(temp_output_path, fourcc, fps, (video_width, video_height))
-
-    frame_idx    = 0
-    punch_frames = 0
-    transitions  = 0
-    prev_on      = False
-
+    out = cv2.VideoWriter("temp_raw_output.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, (vw, vh))
+    i, punch_frames, transitions, prev_on, switches = 0, 0, 0, False, 0
+    prev_label = -1
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-
-        # rótulo vem do EVENTO ao qual o frame pertence (1 só por golpe); fora = "..."
-        lab = frame_label[frame_idx] if frame_idx < len(frame_label) else None
-        on = lab is not None
+        lab = int(labels[i]) if i < len(labels) else -1
+        on = lab >= 0
         if on:
-            ci, conf = lab
-            label_text, label_color = f"{BOXING_CLASSES[ci]} ({conf*100:.1f}%)", (0, 255, 0)
+            txt, color = f"{BOXING_CLASSES[lab]}", (0, 255, 0)
             punch_frames += 1
+            if prev_on and lab != prev_label:       # troca de classe DENTRO de um golpe
+                switches += 1
         else:
-            label_text, label_color = "...", (255, 255, 255)
-
+            txt, color = "...", (255, 255, 255)
         if on != prev_on:
             transitions += 1
-        prev_on = on
-
-        cv2.rectangle(frame, (0, 0), (video_width, 60), (0, 0, 0), -1)
-        cv2.putText(frame, f"STATUS: {label_text}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, label_color, 2, cv2.LINE_AA)
-
-        frame_text = f"Frame: {frame_idx}"
-        (text_width, text_height), _ = cv2.getTextSize(frame_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-        x = video_width - text_width - 20
-        y = video_height - 20
-        cv2.putText(frame, frame_text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
-
+        prev_on, prev_label = on, lab
+        cv2.rectangle(frame, (0, 0), (vw, 60), (0, 0, 0), -1)
+        cv2.putText(frame, f"STATUS: {txt}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+        ft = f"Frame: {i}"
+        (tw, th), _ = cv2.getTextSize(ft, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+        cv2.putText(frame, ft, (vw - tw - 20, vh - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
         out.write(frame)
-        frame_idx += 1
-
-    cap.release()
-    out.release()
-
-    pct = 100.0 * punch_frames / max(frame_idx, 1)
-    print(f"--> Frames com golpe exibido: {punch_frames}/{frame_idx} ({pct:.1f}%)")
-    print(f"--> Eventos exibidos: {n_shown} | transições liga/desliga: {transitions} (ideal ~2x eventos)")
-
-    print("--> Converting codec to H.264...")
+        i += 1
+    cap.release(); out.release()
+    pct = 100.0 * punch_frames / max(i, 1)
+    print(f"--> Frames com golpe: {punch_frames}/{i} ({pct:.1f}%) | transições={transitions} "
+          f"| TROCAS de classe dentro de golpe={switches} (ideal 0)")
     try:
-        cmd = [
-            'ffmpeg', '-y', '-i', temp_output_path,
-            '-vcodec', 'libx264', '-pix_fmt', 'yuv420p', output_path,
-        ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        if os.path.exists(temp_output_path):
-            os.remove(temp_output_path)
+        subprocess.run(['ffmpeg', '-y', '-i', "temp_raw_output.mp4", '-vcodec', 'libx264',
+                        '-pix_fmt', 'yuv420p', output_path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        os.remove("temp_raw_output.mp4")
         print(f"--> Final video saved: {output_path}")
     except Exception as e:
         print(f"FFmpeg error: {e}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Boxing Punch Classifier")
-    parser.add_argument("-v", "--video",  required=True,               help="Input video path")
-    parser.add_argument("-m", "--model",  default="modelo_boxe.keras", help="Model path")
-    parser.add_argument("-o", "--output", default=None,                help="Custom output path")
-    parser.add_argument("--clear-cache",  action="store_true",         help="Force skeleton cache reset")
+    parser.add_argument("-v", "--video", required=True)
+    parser.add_argument("-m", "--model", default="modelo_boxe.keras")
+    parser.add_argument("-o", "--output", default=None)
+    parser.add_argument("--clear-cache", action="store_true")
     args = parser.parse_args()
-
     if not os.path.exists(args.video):
-        print(f"Error: video '{args.video}' not found.")
-        exit(1)
+        print(f"Error: video '{args.video}' not found."); exit(1)
 
     video_path = ensure_25fps(args.video)
+    output_path = args.output or os.path.join("outputs", os.path.basename(args.video))
+    os.makedirs("outputs", exist_ok=True)
 
-    if args.output is None:
-        output_dir = "outputs"
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, os.path.basename(args.video))
-    else:
-        output_path = args.output
-
-    print("--> Loading TensorFlow model...")
-    loaded_model = load_model(args.model)
+    print("--> Loading models...")
+    models = load_models(args.model)
     mean, std = load_norm_stats()
 
-    video_base_name = os.path.splitext(os.path.basename(video_path))[0]
-    cache_path = f"skeletons_{video_base_name}.npy"
+    base = os.path.splitext(os.path.basename(video_path))[0]
+    cache = f"skeletons_{base}.npy"
+    if args.clear_cache and os.path.exists(cache):
+        os.remove(cache)
+    skeletons = np.load(cache) if os.path.exists(cache) else extract_skeletons(video_path)
+    if not os.path.exists(cache):
+        np.save(cache, skeletons)
 
-    if args.clear_cache and os.path.exists(cache_path):
-        os.remove(cache_path)
-        print("--> Previous cache cleared.")
+    # suavização leve dos keypoints
+    for j in range(17):
+        for c in range(2):
+            sig = skeletons[:, j, c]
+            pad = np.pad(sig, (2, 2), mode="edge")
+            skeletons[:, j, c] = np.convolve(pad, np.ones(5) / 5, mode="valid")
 
-    if os.path.exists(cache_path):
-        print(f"--> Cache found: {cache_path}")
-        skeletons = np.load(cache_path)
-    else:
-        skeletons = extract_skeletons(video_path)
-        if skeletons is not None:
-            np.save(cache_path, skeletons)
+    print("--> [3/3] Classificando por PICO da velocidade do punho...")
+    probs = per_frame_probs(skeletons, models, mean, std)
+    speed = wrist_speed_bodyframe(skeletons)
+    labels, spans = label_punches(skeletons, probs, speed)
+    n_ev = len(_spans(labels))
+    print(f"--> {len(spans)} picos detectados, {n_ev} golpes rotulados (1 rótulo contíguo cada)")
+    np.save(f"labels_{base}.npy", labels)   # p/ auditoria frame-a-frame (_verify_adam.py)
+    print("--> SPANS (golpe: frames [on-off] len classe):")
+    for k, (on, off) in enumerate(_spans(labels)):
+        ci = int(labels[on])
+        print(f"    #{k+1}: [{on}-{off}] len={off-on+1} {BOXING_CLASSES[ci]}")
+    render(video_path, output_path, skeletons, labels)
 
-    if skeletons is not None:
-        print("--> Applying skeleton smoothing...")
-        window_size = 5
-        for joint in range(17):
-            for coord in range(2):
-                signal = skeletons[:, joint, coord]
-                padded = np.pad(signal, (window_size // 2, window_size // 2), mode="edge")
-                smoothed = np.convolve(padded, np.ones(window_size) / window_size, mode="valid")
-                skeletons[:, joint, coord] = smoothed
 
-        save_video_with_predictions(video_path, output_path, skeletons, loaded_model, mean, std)
+if __name__ == "__main__":
+    main()
