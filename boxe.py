@@ -32,13 +32,19 @@ X_STD_FALLBACK  = np.array([1.0, 1.0], dtype=np.float32)
 
 WRIST = [9, 10]      # COCO: punho esquerdo e direito
 
-# Cores por SLOT de tela (BGR), não por boxeador fixo. id=1 é sempre quem está à
-# ESQUERDA do frame, id=2 quem está à DIREITA (decidido frame a frame). A cor da
-# caixa de cada boxeador acompanha o slot, então o rótulo do topo e a caixa têm a
-# mesma cor. id=1 = verde, id=2 = ciano. O esqueleto em si é desenhado pelo
-# Annotator.kpts() da ultralytics (paleta de pose própria), então só as caixas e
-# os rótulos usam estas cores.
+# Cores por SLOT de tela (BGR). slot 0 = boxeador da ESQUERDA (Left), slot 1 =
+# DIREITA (Right). A cor da caixa acompanha o slot, então o rótulo do topo e a
+# caixa têm a mesma cor: Left = verde, Right = ciano. O esqueleto é desenhado pelo
+# Annotator.kpts() da ultralytics (paleta de pose própria); só caixas e rótulos
+# usam estas cores.
 SLOT_COLORS = [(0, 255, 0), (255, 255, 0)]
+
+# Fração mínima de frames em que um slot precisa aparecer para contar como um
+# boxeador REAL. Mata detecções espúrias: num clipe de 1 boxeador, o YOLO às vezes
+# vê "2 persons" por alguns frames (reflexo, sombra, treinador) -> isso criaria um
+# segundo slot fantasma e o vídeo todo viraria "Left/Right" em vez de "Boxer". Só
+# slots presentes em > MIN_PRESENCE_RATIO do clipe são desenhados/rotulados.
+MIN_PRESENCE_RATIO = 0.10
 
 # Inferência por SEGMENTO DE MOVIMENTO (não frame a frame, nem por pico). O dataset é
 # segmentado por golpe (start/end por linha), então a inferência também é: um golpe = uma
@@ -450,10 +456,17 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
     slot_names = ("Left", "Right")   # boxers[0]=Left, boxers[1]=Right
 
     # Left/Right só faz sentido com DOIS boxeadores. slot_active marca quais slots
-    # aparecem em algum frame do clipe; two_boxers = ambos aparecem. Com um só
-    # boxeador o rótulo vira "Boxer" (sem Left/Right) e o slot vazio não recebe
-    # rótulo nenhum. active_idx = qual slot está ativo no caso de 1 boxeador.
-    slot_active = [bool(boxers[bi]["present"].any()) for bi in range(len(boxers))]
+    # são boxeadores REAIS = presentes em mais de MIN_PRESENCE_RATIO do clipe (não
+    # só "em algum frame"). Esse limiar descarta o slot fantasma criado por
+    # detecções espúrias de "2 persons" em poucos frames - sem ele, um clipe de 1
+    # boxeador viraria "Left/Right" por causa de um reflexo de 5 frames.
+    # two_boxers = ambos os slots são reais. Com um só, o rótulo vira "Boxer" e o
+    # outro slot não é desenhado nem rotulado. active_idx = qual slot é o único real.
+    total = len(boxers[0]["present"]) if boxers else 0
+    slot_active = [
+        bool(boxers[bi]["present"].sum() > MIN_PRESENCE_RATIO * total)
+        for bi in range(len(boxers))
+    ]
     two_boxers  = sum(slot_active) >= 2
     active_idx  = next((bi for bi in range(len(boxers)) if slot_active[bi]), 0)
 
@@ -474,10 +487,14 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
         if not ret:
             break
 
-        # quem está presente neste frame (índice do boxeador = slot já fixo)
+        # quem está presente neste frame (índice do boxeador = slot já fixo).
+        # slot_active filtra o slot fantasma: um slot abaixo do limiar de presença
+        # não é desenhado nem rotulado em frame nenhum, mesmo nos poucos frames
+        # espúrios em que apareceu.
         present = [
             bi for bi in range(len(boxers))
-            if frame_idx < len(boxers[bi]["present"]) and boxers[bi]["present"][frame_idx]
+            if slot_active[bi]
+            and frame_idx < len(boxers[bi]["present"]) and boxers[bi]["present"][frame_idx]
         ]
 
         # texto de cada slot (ausente ou sem golpe -> "..."). slot_text[0]=Left,
