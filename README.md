@@ -13,6 +13,11 @@ Os golpes atualmente suportados são:
 
 O sistema recebe um vídeo como entrada, extrai os keypoints corporais utilizando o modelo de pose do YOLOv8, realiza o pré-processamento dos esqueletos e aplica um modelo treinado em TensorFlow para identificar os golpes ao longo do vídeo.
 
+> **Atualizações** (detalhes em [`MUDANCAS.md`](MUDANCAS.md), próximos passos em [`PLANO_ACAO.md`](PLANO_ACAO.md)):
+> a normalização passou a ser **relativa ao corpo** (recentro no quadril + escala de ombro,
+> invariante a posição/escala/câmera) e a inferência passou a ser **por evento** (segmentação
+> por movimento do punho → 1 rótulo estável por golpe). O modelo é treinado por `train.py`.
+
 ---
 
 # Instalação

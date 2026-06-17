@@ -28,6 +28,64 @@ def add_velocity_and_acceleration(X):
     return np.concatenate([X, vel, acc], axis=-1)
 
 
+WINDOW_LEN = 25
+REAL_LEN = 10  # frames reais por janela (média do dataset); o resto é padding de zeros
+
+# COCO: ombros 5,6 · cotovelos 7,8 · punhos 9,10 · quadris 11,12
+SHO_L, SHO_R, HIP_L, HIP_R = 5, 6, 11, 12
+
+
+def body_frame_windows(windows):
+    """Normaliza para o referencial do CORPO (invariante a posição/escala/câmera):
+    recentra cada frame no quadril médio (11,12) e divide pela escala do corpo
+    (largura de ombro mediana na janela). Frames de padding (tudo zero) continuam zero.
+    É a correção central do colapso cross-video — antes as coords absolutas codificavam
+    lado da câmera e zoom. Usada IGUAL no treino e na inferência. windows: (N,25,17,2)."""
+    W = np.asarray(windows, dtype=np.float32)
+    real = (W != 0).any(axis=(2, 3))                              # (N,25) frame real?
+    mid_hip = (W[:, :, HIP_L, :] + W[:, :, HIP_R, :]) / 2.0       # (N,25,2)
+    sho_w = np.linalg.norm(W[:, :, SHO_L, :] - W[:, :, SHO_R, :], axis=2)  # (N,25)
+    out = np.zeros_like(W)
+    for i in range(len(W)):
+        m = real[i]
+        if not m.any():
+            continue
+        s = np.median(sho_w[i][m])
+        s = s if s > 1e-3 else 1e-3
+        fr = W[i, m]                                   # (n,17,2) frames reais
+        jm = (fr != 0).any(axis=2, keepdims=True)      # (n,17,1) junta detectada?
+        out[i, m] = np.where(jm, (fr - mid_hip[i, m][:, None, :]) / s, 0.0)
+    # clipa para range corporal sã (mata outliers de coords ruins, ex. V6 cru em pixels)
+    return np.clip(out, -6.0, 6.0)
+
+
+def make_window(skeletons, end_idx, real_len=REAL_LEN):
+    """Monta a janela no MESMO layout do treino: os frames reais ficam no INÍCIO e
+    o resto é zero. O .npy do BoxingVI usa esse formato (golpe curto ~10 frames +
+    padding até 25). Antes a inferência usava 25 frames densos, que o modelo nunca
+    viu no treino (out-of-distribution) — principal causa dos golpes falsos.
+
+    `skeletons` tem shape (frames, 17, 2); `end_idx` é o frame atual.
+    Retorna (25, 34) ou None se ainda não há frames reais suficientes.
+    """
+    start = end_idx - real_len + 1
+    if start < 0:
+        return None
+    window = np.zeros((WINDOW_LEN, 17, 2), dtype=np.float32)
+    window[:real_len] = skeletons[start:end_idx + 1]
+    return window
+
+
+def preprocess_windows(windows, mean, std):
+    """Pipeline COMPARTILHADA treino == inferência: referencial do corpo -> padronização
+    por EIXO (x,y separados) -> velocidade/aceleração. windows: (N,25,17,2) coords cruas;
+    mean,std: arrays (2,) [x,y] ajustados no treino. Retorna (N,25,102)."""
+    B = body_frame_windows(windows).reshape(len(windows), WINDOW_LEN, 34)
+    B[:, :, 0::2] = (B[:, :, 0::2] - mean[0]) / std[0]   # colunas pares = x
+    B[:, :, 1::2] = (B[:, :, 1::2] - mean[1]) / std[1]   # colunas ímpares = y
+    return add_velocity_and_acceleration(B)
+
+
 def load_all_videos(videos=DEFAULT_VIDEOS):
     X_all, y_all_raw = [], []
     for video in videos:
