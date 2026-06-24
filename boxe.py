@@ -102,33 +102,20 @@ def ensure_25fps(video_path):
 
 
 def extract_skeletons(video_path):
-    # MUDANÇA - EXTRAÇÃO MULTI-PESSOA POR FRAME (antes era 1 boxeador só)
-    # ------------------------------------------------------------------
-    # A versão ANTIGA pegava `r.keypoints.data[0]` (a primeira pessoa) e jogava
-    # o resto fora, então o pipeline inteiro só via UM esqueleto por frame. Isso
-    # serve para 1 boxeador, mas aqui há DOIS no ringue e a ordem das detecções
-    # do YOLO não é estável - "[0]" pode ser qualquer um deles a cada frame.
-    #
-    # A versão NOVA guarda TODAS as pessoas de CADA frame numa lista simples.
-    # Continuamos usando `.track()` (o tracking ajuda: associa detecções no tempo,
-    # reduz flicker das caixas e recupera detecções fracas), mas IGNORAMOS o
-    # `r.boxes.id`. Motivo: a identidade dos boxeadores é decidida depois por
-    # POSIÇÃO (esquerda/direita), não por id. Ids do YOLO trocam (2->3->4) em
-    # oclusão/clinch, o que quebraria a montagem por id - por isso não dependemos
-    # deles.
+    # EXTRAÇÃO MULTI-PESSOA AGRUPADA POR TRACK ID DO YOLO
+    # ----------------------------------------------------
+    # Usa `.track()` do YOLO (ByteTrack interno) e AGRUPA as detecções por
+    # `r.boxes.id` — o ID de rastreamento que o YOLO atribui a cada pessoa.
+    # Isso mantém a identidade de cada lutador estável ao longo do vídeo,
+    # mesmo em oclusão parcial e clinch.
     #
     # Retorna:
-    #   frames_dets  lista de tamanho T; frames_dets[f] = lista de detecções desse
-    #                frame, cada uma um dict:
-    #                  "coords" (17,2) x,y normalizados por largura/altura
-    #                  "conf"   (17,)  confiança por junta (para Annotator.kpts)
-    #                  "box"    (4,)   caixa x1,y1,x2,y2 em PIXELS
+    #   tracks      dict {track_id: track_data} onde track_data contém:
+    #                 "coords"  (T,17,2) x,y normalizados por largura/altura
+    #                 "conf"    (T,17)   confiança por junta
+    #                 "boxes"   (T,4)    caixa x1,y1,x2,y2 em PIXELS
+    #                 "present" (T,)     bool — True nos frames detectados
     #   total_frames, video_width, video_height
-    #
-    # NOTA (a revisitar): o filtro de qualidade abaixo ainda é o corte cego pela
-    # confiança MÉDIA das juntas (>= 0.5), herdado do código antigo. Descarta
-    # frames parciais úteis (ex. pernas ocluídas, tronco nítido). Melhoria futura:
-    # zerar só juntas fracas e exigir só as âncoras do tronco (ombros/quadris).
     print(f"--> [1/3] Running YOLO-Pose: {video_path}")
     model_yolo = YOLO("yolov8m-pose.pt")
 
@@ -138,46 +125,52 @@ def extract_skeletons(video_path):
     video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     cap.release()
 
-    frames_dets = [[] for _ in range(total_frames)]
+    tracks = {}
 
-    # `.track()` (com tracking, mas vamos ignorar os ids que ele produz).
+    def _new_track():
+        return {
+            "coords":  np.zeros((total_frames, 17, 2)),
+            "conf":    np.zeros((total_frames, 17)),
+            "boxes":   np.zeros((total_frames, 4)),
+            "present": np.zeros(total_frames, dtype=bool),
+        }
+
     results = model_yolo.track(source=video_path, stream=True, device="cuda", conf=0.3)
 
     for frame_idx, r in enumerate(results):
         if frame_idx >= total_frames:
             break
-        if r.boxes is None or r.keypoints is None:
+        # Precisamos de keypoints E boxes COM ids. Se o tracker não conseguiu
+        # atribuir IDs neste frame, pula — os frames sem ID viram lacunas
+        # preenchidas depois por build_dense_skeletons().
+        if r.boxes is None or r.keypoints is None or r.boxes.id is None:
             continue
 
-        kp_all = r.keypoints.data.cpu().numpy()   # (N pessoas, 17, 3): x, y, conf
-        xyxy   = r.boxes.xyxy.cpu().numpy()       # (N, 4) cantos da caixa, pixels
+        kp_all = r.keypoints.data.cpu().numpy()        # (N, 17, 3): x, y, conf
+        ids    = r.boxes.id.cpu().numpy().astype(int)   # (N,) track id por pessoa
+        xyxy   = r.boxes.xyxy.cpu().numpy()             # (N, 4) caixa em pixels
 
-        # Percorre TODAS as pessoas do frame e guarda as que passam no filtro.
-        # (Repare: NÃO lemos r.boxes.id - o tracking roda, mas o id é ignorado.)
-        for kp, box in zip(kp_all, xyxy):
-            # kp tem shape (17, 3): 17 juntas COCO (x, y, conf). Se vier diferente
-            # de 17 (detecção malformada), pula - o código indexa juntas fixas
-            # (WRIST=[9,10], ombros 5/6, quadris 11/12). Guarda defensiva.
+        for kp, tid, box in zip(kp_all, ids, xyxy):
             if kp.shape[0] != 17:
                 continue
-            # Mesmo filtro do código antigo: confiança média das juntas >= 0.5.
+            # Mesmo filtro de qualidade: confiança média das juntas >= 0.5.
             if kp[:, 2].mean() < 0.5:
                 continue
 
-            # Normaliza x,y pelo tamanho do frame, como antes (espaço 0..1 do treino).
+            # Normaliza x,y pelo tamanho do frame (espaço 0..1 do treino).
             coords_xy = kp[:, :2].copy()
             coords_xy[:, 0] /= video_width
             coords_xy[:, 1] /= video_height
 
-            frames_dets[frame_idx].append({
-                "coords": coords_xy,        # (17,2) normalizado
-                "conf":   kp[:, 2].copy(),  # (17,) confiança por junta
-                "box":    box.copy(),       # (4,) x1,y1,x2,y2 em pixels
-            })
+            if tid not in tracks:
+                tracks[tid] = _new_track()
+            tracks[tid]["coords"][frame_idx]  = coords_xy
+            tracks[tid]["conf"][frame_idx]    = kp[:, 2].copy()
+            tracks[tid]["boxes"][frame_idx]   = box.copy()
+            tracks[tid]["present"][frame_idx] = True
 
-    n_dets = sum(len(d) for d in frames_dets)
-    print(f"--> [2/3] Skeleton extraction complete. {n_dets} detecções em {total_frames} frames.")
-    return frames_dets, total_frames, video_width, video_height
+    print(f"--> [2/3] Skeleton extraction complete. {len(tracks)} tracks found.")
+    return tracks, total_frames, video_width, video_height
 
 
 def preprocess_window(window, mean, std):
@@ -230,91 +223,163 @@ def detect_events(skeletons):
     return events, spd
 
 
-def assign_boxers_by_position(frames_dets, total_frames, video_width):
-    # MUDANÇA - IDENTIDADE POR POSIÇÃO (esquerda/direita), SEM usar ids do YOLO
-    # ------------------------------------------------------------------------
-    # extract_skeletons() devolve as detecções de cada frame, sem id. Aqui montamos
-    # DOIS "slots" de boxeador a partir da POSIÇÃO horizontal:
-    #   slot 0 = boxeador da ESQUERDA  -> rótulo "Left boxer"
-    #   slot 1 = boxeador da DIREITA   -> rótulo "Right boxer"
-    #
-    # Por que por posição e não por id: o id do YOLO troca (2->3->4) em
-    # oclusão/clinch; ranquear/seguir por id quebra quando isso acontece. Como só
-    # há 2 boxeadores e nada mais no frame, "quem está à esquerda / à direita" é
-    # uma identidade estável o suficiente - e sobrevive à troca de id.
-    #
-    # `dets` (= frames_dets[f]) é a LISTA de pessoas que o YOLO detectou no frame f;
-    # cada item é um dict {coords (17,2), conf (17,), box (4,)}. Ordenando essa
-    # lista por center_x = (x1+x2)/2 (o CENTRO horizontal da caixa), dets[0] é a
-    # pessoa MAIS À ESQUERDA e dets[-1] a MAIS À DIREITA. Usamos o centro (não a
-    # borda x1) porque ele é mais robusto quando as caixas têm larguras diferentes.
-    #
-    # put(slot, det, f) grava os dados de uma detecção no slot indicado, no frame f.
-    # Então put(0, dets[0]) = "a pessoa mais à esquerda vira o Left boxer" e
-    # put(1, dets[-1]) = "a mais à direita vira o Right boxer". Isso é toda a
-    # "identidade por posição". Pegar os extremos (0 e -1) ignora de brinde uma
-    # detecção espúria que caia no meio, sem precisar calcular área.
-    #
-    # Limitação aceita (decisão do plano - sem persistência): se os boxeadores se
-    # CRUZAM de lado, os slots trocam (quem era "Left" vira "Right"). É justamente
-    # por isso que o rótulo na tela diz "Left/Right boxer" em vez de um id fixo:
-    # o rótulo descreve a POSIÇÃO atual, que é o que o slot representa.
-    #
-    # Cada slot é o MESMO formato que build_dense_skeletons espera:
-    #   coords (T,17,2) | conf (T,17) | boxes (T,4) px | present (T,) bool
-    slots = [
-        {
-            "coords":  np.zeros((total_frames, 17, 2)),
-            "conf":    np.zeros((total_frames, 17)),
-            "boxes":   np.zeros((total_frames, 4)),
-            "present": np.zeros(total_frames, dtype=bool),
-        }
-        for _ in range(2)
-    ]
-    last_cx = [None, None]   # último center_x conhecido de cada slot (continuidade)
+def merge_fragmented_tracks(tracks, total_frames):
+    # MERGE DE TRACKS FRAGMENTADOS — funde IDs diferentes do MESMO lutador
+    # -------------------------------------------------------------------
+    # O ByteTrack pode gerar IDs NOVOS quando perde e reencontra uma pessoa
+    # (ex: ID 3 → oclusão → ID 7). As duas tracks representam a MESMA pessoa.
+    # Identificamos isso por:
+    #   1. Baixa sobreposição temporal (< 10% dos frames de qualquer track)
+    #   2. Proximidade espacial na transição (center de A próximo ao de B)
+    # Ao fundir, o track resultante herda o ID do mais antigo.
+    OVERLAP_RATIO_MAX = 0.10   # sobreposição máxima para considerar merge
+    SPATIAL_DIST_MAX  = 0.15   # distância normalizada máxima para merge
 
-    def center_x(det):
-        return (det["box"][0] + det["box"][2]) / 2.0   # (x1+x2)/2 em pixels
+    merged = True
+    while merged:
+        merged = False
+        tids = list(tracks.keys())
+        for i in range(len(tids)):
+            if tids[i] not in tracks:
+                continue
+            for j in range(i + 1, len(tids)):
+                if tids[j] not in tracks:
+                    continue
+                tA, tB = tracks[tids[i]], tracks[tids[j]]
+                pA = np.where(tA["present"])[0]
+                pB = np.where(tB["present"])[0]
+                if len(pA) == 0 or len(pB) == 0:
+                    continue
 
-    def put(slot, det, f):
-        slots[slot]["coords"][f]  = det["coords"]
-        slots[slot]["conf"][f]    = det["conf"]
-        slots[slot]["boxes"][f]   = det["box"]
-        slots[slot]["present"][f] = True
-        last_cx[slot] = center_x(det)
+                # 1) Sobreposição temporal
+                overlap = np.sum(tA["present"] & tB["present"])
+                min_len = min(len(pA), len(pB))
+                if min_len > 0 and overlap / min_len > OVERLAP_RATIO_MAX:
+                    continue   # coexistem no tempo → são pessoas diferentes
 
-    for f in range(total_frames):
-        dets = frames_dets[f]
-        if not dets:
+                # 2) Proximidade espacial na transição
+                # Qual termina primeiro? Comparamos o último frame de A com o
+                # primeiro de B (ou vice-versa, dependendo da ordem temporal).
+                if pA[-1] <= pB[0]:
+                    # A termina antes de B começar (ou logo no início de B)
+                    last_box_A  = tA["boxes"][pA[-1]]
+                    first_box_B = tB["boxes"][pB[0]]
+                elif pB[-1] <= pA[0]:
+                    # B termina antes de A
+                    last_box_A  = tB["boxes"][pB[-1]]
+                    first_box_B = tA["boxes"][pA[0]]
+                else:
+                    # Sobreposição parcial — usar centros médios
+                    cx_A = np.mean((tA["boxes"][pA, 0] + tA["boxes"][pA, 2]) / 2.0)
+                    cy_A = np.mean((tA["boxes"][pA, 1] + tA["boxes"][pA, 3]) / 2.0)
+                    cx_B = np.mean((tB["boxes"][pB, 0] + tB["boxes"][pB, 2]) / 2.0)
+                    cy_B = np.mean((tB["boxes"][pB, 1] + tB["boxes"][pB, 3]) / 2.0)
+                    last_box_A  = np.array([cx_A, cy_A, cx_A, cy_A])
+                    first_box_B = np.array([cx_B, cy_B, cx_B, cy_B])
+
+                # Centro das caixas de transição (em pixels → normalizar)
+                cx_a = (last_box_A[0] + last_box_A[2]) / 2.0
+                cy_a = (last_box_A[1] + last_box_A[3]) / 2.0
+                cx_b = (first_box_B[0] + first_box_B[2]) / 2.0
+                cy_b = (first_box_B[1] + first_box_B[3]) / 2.0
+                # Normalizar pela diagonal da caixa maior (escala robusta)
+                diag_a = np.sqrt((last_box_A[2] - last_box_A[0])**2 +
+                                 (last_box_A[3] - last_box_A[1])**2)
+                diag_b = np.sqrt((first_box_B[2] - first_box_B[0])**2 +
+                                 (first_box_B[3] - first_box_B[1])**2)
+                scale = max(diag_a, diag_b, 1.0)
+                dist = np.sqrt((cx_a - cx_b)**2 + (cy_a - cy_b)**2) / scale
+
+                if dist > SPATIAL_DIST_MAX:
+                    continue   # muito longe → são pessoas diferentes
+
+                # FUNDIR: copiar dados de B para A nos frames onde A não tinha
+                mask_B = tB["present"] & ~tA["present"]
+                tA["coords"][mask_B]  = tB["coords"][mask_B]
+                tA["conf"][mask_B]    = tB["conf"][mask_B]
+                tA["boxes"][mask_B]   = tB["boxes"][mask_B]
+                tA["present"][mask_B] = True
+                del tracks[tids[j]]
+                merged = True
+                print(f"    --> Merge: track {tids[j]} fundido em track {tids[i]}")
+
+    print(f"--> Merge: {len(tracks)} tracks após fusão de fragmentos")
+    return tracks
+
+
+def select_boxers(tracks, total_frames):
+    # SELECIONAR OS 2 LUTADORES POR SCORE (wrist_motion × presence)
+    # -------------------------------------------------------------
+    # Cada track recebe um score que combina presença (fração de frames em que
+    # aparece) e movimento do punho (atividade de boxe). Os 2 tracks com maior
+    # score são os lutadores; o resto (árbitro, espectadores) é descartado.
+    scored = []
+    for tid, t in tracks.items():
+        present_idx = np.where(t["present"])[0]
+        if len(present_idx) < 2:
             continue
-        dets = sorted(dets, key=center_x)   # esquerda -> direita
 
-        if len(dets) >= 2:
-            put(0, dets[0],  f)   # mais à esquerda = Left boxer
-            put(1, dets[-1], f)   # mais à direita  = Right boxer
-        else:
-            # Só 1 pessoa neste frame: ela é o Left ou o Right boxer? Decidimos por
-            # CONTINUIDADE - perto de qual boxeador ela estava no frame anterior.
-            # last_cx[0]/last_cx[1] = último center_x de cada slot. d0/d1 = quão
-            # longe esta detecção está de onde cada boxeador estava por último
-            # (None -> infinito, ou seja, slot sem histórico não pode dar match).
-            d = dets[0]
-            x = center_x(d)
-            d0 = abs(x - last_cx[0]) if last_cx[0] is not None else float("inf")
-            d1 = abs(x - last_cx[1]) if last_cx[1] is not None else float("inf")
-            if d0 == float("inf") and d1 == float("inf"):
-                slot = 0 if x < video_width / 2 else 1   # sem histórico: metade do frame
-            else:
-                slot = 0 if d0 <= d1 else 1               # vai pro boxeador mais próximo
-            put(slot, d, f)
+        presence = len(present_idx) / total_frames
 
-    # Diagnóstico (não afeta a saída): conta em quantos frames cada slot ficou com
-    # uma detecção real (present==True) e imprime, para conferir no console que os
-    # dois boxeadores foram seguidos na maior parte do clipe.
-    p0 = int(slots[0]["present"].sum())
-    p1 = int(slots[1]["present"].sum())
-    print(f"--> Identidade por posição: Left presente {p0}/{total_frames} | "
-          f"Right presente {p1}/{total_frames}")
+        # Movimento do punho: velocidade frame-a-frame dos WRIST=[9,10]
+        # nos frames presentes (evita contar lacunas como parado).
+        wrists = t["coords"][present_idx][:, WRIST, :]    # (P, 2, 2)
+        steps  = np.diff(wrists, axis=0)                   # (P-1, 2, 2)
+        wrist_motion = np.linalg.norm(steps, axis=2).sum() / len(present_idx)
+
+        score = wrist_motion * presence
+        scored.append((tid, score, wrist_motion, presence))
+
+    scored.sort(key=lambda s: s[1], reverse=True)
+
+    print("--> Boxer selection (wrist_motion × presence):")
+    for rank, (tid, score, wm, pres) in enumerate(scored):
+        tag = "BOXER" if rank < 2 else "drop "
+        print(f"      [{tag}] id={tid}  score={score:.4f}  "
+              f"wrist={wm:.4f}  presence={pres:.2f}")
+
+    return [tid for tid, _, _, _ in scored[:2]]
+
+
+def assign_slots_by_median_position(tracks, boxer_ids, total_frames):
+    # ATRIBUIÇÃO GLOBAL Left/Right POR MEDIANA DO center_x
+    # ---------------------------------------------------
+    # Os 2 lutadores selecionados são mapeados para slots Left (0) / Right (1)
+    # usando a MEDIANA do center_x de cada um ao longo do vídeo TODO. Isso é
+    # uma decisão GLOBAL e ÚNICA (não frame a frame), então não oscila.
+    # Se os lutadores trocam de lado, os slots mantêm a identidade ORIGINAL.
+    if not boxer_ids:
+        return []
+
+    # Calcular mediana do center_x para cada boxer selecionado
+    medians = []
+    for tid in boxer_ids:
+        t = tracks[tid]
+        present_idx = np.where(t["present"])[0]
+        if len(present_idx) == 0:
+            medians.append(float("inf"))
+            continue
+        cx = (t["boxes"][present_idx, 0] + t["boxes"][present_idx, 2]) / 2.0
+        medians.append(float(np.median(cx)))
+
+    # Ordenar por mediana: menor center_x → slot 0 (Left)
+    order = sorted(range(len(boxer_ids)), key=lambda i: medians[i])
+
+    slots = []
+    slot_names_debug = []
+    for slot_idx, oi in enumerate(order):
+        tid = boxer_ids[oi]
+        t = tracks[tid]
+        slots.append({
+            "coords":  t["coords"].copy(),
+            "conf":    t["conf"].copy(),
+            "boxes":   t["boxes"].copy(),
+            "present": t["present"].copy(),
+        })
+        name = "Left" if slot_idx == 0 else "Right"
+        slot_names_debug.append(f"{name}=id{tid} (median_cx={medians[oi]:.1f})")
+
+    print(f"--> Slot assignment: {' | '.join(slot_names_debug)}")
     return slots
 
 
@@ -586,12 +651,11 @@ if __name__ == "__main__":
     loaded_model = load_model(args.model)
     mean, std = load_norm_stats()
 
-    # Cache: a chave mudou de "skeletons_" para "dets_" porque o objeto cacheado
-    # agora é a lista de detecções por frame (frames_dets) + dimensões do vídeo, e
-    # não mais a matriz única (frames,17,2). Nome novo evita carregar um cache
-    # antigo no formato errado.
+    # Cache: a chave mudou de "dets_" para "tracks_" porque o objeto cacheado
+    # agora é o dict de tracks por ID do YOLO + dimensões do vídeo. Nome novo
+    # invalida caches antigos automaticamente.
     video_base_name = os.path.splitext(os.path.basename(video_path))[0]
-    cache_path = f"dets_{video_base_name}.npy"
+    cache_path = f"tracks_{video_base_name}.npy"
 
     if args.clear_cache and os.path.exists(cache_path):
         os.remove(cache_path)
@@ -600,27 +664,32 @@ if __name__ == "__main__":
     if os.path.exists(cache_path):
         print(f"--> Cache found: {cache_path}")
         cached = np.load(cache_path, allow_pickle=True).item()
-        frames_dets  = cached["frames_dets"]
+        tracks       = cached["tracks"]
         total_frames = cached["total_frames"]
         video_width  = cached["video_width"]
         video_height = cached["video_height"]
     else:
-        frames_dets, total_frames, video_width, video_height = extract_skeletons(video_path)
-        # estrutura não-retangular (lista de listas de dict) -> embrulha em array de
-        # objeto 0-d para o np.save.
+        tracks, total_frames, video_width, video_height = extract_skeletons(video_path)
         np.save(cache_path, np.array(
-            {"frames_dets": frames_dets, "total_frames": total_frames,
+            {"tracks": tracks, "total_frames": total_frames,
              "video_width": video_width, "video_height": video_height},
             dtype=object,
         ))
 
-    # Identidade por posição: monta os 2 slots (Left/Right) a partir das detecções.
-    slots = assign_boxers_by_position(frames_dets, total_frames, video_width)
+    # Fundir tracks fragmentados do mesmo lutador (IDs diferentes após oclusão)
+    tracks = merge_fragmented_tracks(tracks, total_frames)
+
+    # Selecionar os 2 lutadores pelo score wrist_motion × presence
+    boxer_ids = select_boxers(tracks, total_frames)
+    if not boxer_ids:
+        print("Error: nenhum track com atividade de boxe encontrado.")
+        exit(1)
+
+    # Atribuir slots Left/Right por mediana global do center_x
+    slots = assign_slots_by_median_position(tracks, boxer_ids, total_frames)
 
     # Este loop roda UMA VEZ POR SLOT (Left, depois Right). Tudo dentro dele -
-    # inclusive a suavização 5-tap - executa por boxeador. No código antigo a
-    # suavização ficava fora de qualquer loop, então rodava uma única vez no
-    # esqueleto único.
+    # inclusive a suavização 5-tap - executa por boxeador.
     boxers = []
     for i, slot in enumerate(slots):
         print(f"--> {'Left' if i == 0 else 'Right'} boxer:")
@@ -628,9 +697,7 @@ if __name__ == "__main__":
         # 1) esqueleto DENSO (lacunas preenchidas) para a classificação
         dense = build_dense_skeletons(slot, total_frames)
 
-        # 2) suavização temporal 5-tap - MESMO bloco do __main__ antigo (mesma conta).
-        #    Diferença: está DENTRO do loop por slot e opera sobre `dense` (a matriz
-        #    deste boxeador), então roda uma vez para cada um.
+        # 2) suavização temporal 5-tap (mesma conta do código original)
         window_size = 5
         for joint in range(17):
             for coord in range(2):
