@@ -24,7 +24,11 @@ if gpus:
     except RuntimeError as e:
         print(f"GPU error: {e}")
 
-BOXING_CLASSES = ["Cross", "Jab", "Lead Hook", "Lead Uppercut", "Rear Hook", "Rear Uppercut"]
+# Ordem TEM que casar com o softmax do modelo: o build_label_mapping ordena os
+# rótulos únicos (sorted) -> {'Hook':0, 'Straight':1, 'Uppercut':2}, então o índice
+# do argmax aqui só significa a classe certa nesta ordem exata. São 3 saídas, não 6.
+# Hardcode rápido: a versão robusta (ler os nomes do norm_stats.npz) fica para depois.
+BOXING_CLASSES = ["Hook", "Straight", "Uppercut"]
 
 # Fallback caso norm_stats.npz não exista (mean/std por eixo, no referencial do corpo).
 X_MEAN_FALLBACK = np.array([0.0, 0.0], dtype=np.float32)
@@ -32,11 +36,13 @@ X_STD_FALLBACK  = np.array([1.0, 1.0], dtype=np.float32)
 
 WRIST = [9, 10]      # COCO: punho esquerdo e direito
 
-# Cores por SLOT de tela (BGR). slot 0 = boxeador da ESQUERDA (Left), slot 1 =
-# DIREITA (Right). A cor da caixa acompanha o slot, então o rótulo do topo e a
-# caixa têm a mesma cor: Left = verde, Right = ciano. O esqueleto é desenhado pelo
-# Annotator.kpts() da ultralytics (paleta de pose própria); só caixas e rótulos
-# usam estas cores.
+# Cores por SLOT (BGR). slot 0 = Boxer 1 (verde), slot 1 = Boxer 2 (ciano). A cor
+# acompanha o slot, que é uma identidade PERSISTENTE (mesmo lutador o clipe inteiro,
+# fixado pelo track ID) — não o lado da tela. Caixa e rótulo do topo dividem a mesma
+# cor, então dá pra seguir o mesmo lutador mesmo depois de ele cruzar de lado: o NOME
+# "Boxer N" e a COR são estáveis, e juntos mostram qual lado da tela ele ocupa agora.
+# O esqueleto é desenhado pelo Annotator.kpts() da ultralytics (paleta de pose
+# própria); só caixas e rótulos usam estas cores.
 SLOT_COLORS = [(0, 255, 0), (255, 255, 0)]
 
 # Fração mínima de frames em que um slot precisa aparecer para contar como um
@@ -221,15 +227,18 @@ def detect_events(skeletons):
 
 
 def assign_boxers(frames_dets, total_frames, video_width):
-    # IDENTIDADE HÍBRIDA: TRACK ID DO YOLO + POSIÇÃO COMO FALLBACK
-    # ------------------------------------------------------------
-    # Monta DOIS "slots" de boxeador (slot 0 = Left, slot 1 = Right) usando
-    # uma estratégia em DUAS FASES por frame:
+    # IDENTIDADE PERSISTENTE POR TRACK ID (com POSIÇÃO só de FALLBACK)
+    # ---------------------------------------------------------------
+    # Monta DOIS "slots" de boxeador. A identidade NÃO é por posição: cada slot
+    # PERSISTE o mesmo lutador pelo track ID do ByteTrack, mesmo depois de eles
+    # cruzarem de lado. A posição inicial só decide quem entra em qual slot na
+    # primeira vez; daí em diante o ID manda. A estratégia é em DUAS FASES por frame:
     #
     # FASE 1 — MATCH POR ID: se uma detecção tem um track ID (`tid`) que já
     # foi associado a um slot em frames anteriores, ela vai direto para esse
-    # slot. O ByteTrack do YOLO mantém IDs estáveis mesmo quando os lutadores
-    # trocam de lado — isso resolve o flickering de tags.
+    # slot — independentemente de qual lado da tela ela está agora. O ByteTrack
+    # mantém IDs estáveis mesmo quando os lutadores trocam de lado, então o slot
+    # segura o MESMO lutador o clipe inteiro (sem flickering de tags).
     #
     # FASE 2 — FALLBACK POR POSIÇÃO: detecções sem ID (tid=None) ou com ID
     # desconhecido (novo ID após oclusão) são atribuídas por posição, exatamente
@@ -299,10 +308,10 @@ def assign_boxers(frames_dets, total_frames, video_width):
                 put(0, remaining[0],  f)
                 put(1, remaining[-1], f)
             elif not assigned[0] and remaining:
-                # Slot 0 (Left) livre — pega o mais à esquerda dos restantes
+                # Slot 0 livre (não matchou por ID) — pega o mais à esquerda dos restantes
                 put(0, remaining[0], f)
             elif not assigned[1] and remaining:
-                # Slot 1 (Right) livre — pega o mais à direita dos restantes
+                # Slot 1 livre (não matchou por ID) — pega o mais à direita dos restantes
                 put(1, remaining[-1], f)
 
         else:
@@ -332,8 +341,8 @@ def assign_boxers(frames_dets, total_frames, video_width):
 
     p0 = int(slots[0]["present"].sum())
     p1 = int(slots[1]["present"].sum())
-    print(f"--> Identidade híbrida (ID+posição): Left presente {p0}/{total_frames} | "
-          f"Right presente {p1}/{total_frames}")
+    print(f"--> Identidade persistente (track ID + posição de fallback): "
+          f"Boxer 1 presente {p0}/{total_frames} | Boxer 2 presente {p1}/{total_frames}")
     return slots
 
 
@@ -454,31 +463,33 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
     #   out_box  = só caixas delimitadoras (sem esqueleto)
     #   out_pose = caixas + esqueleto COCO desenhado por boxeador
     # Os dois mostram a mesma barra de topo com os dois rótulos lado a lado:
-    #   "Left boxer: Jab (98.0%)"      (à esquerda)
-    #   "Right boxer: Cross (66.2%)"   (à direita)
+    #   "Boxer 1: Straight (98.0%)"
+    #   "Boxer 2: Hook (66.2%)"
     #
-    # `boxers` é uma lista de 1 ou 2 entradas JÁ na ordem de posição vinda de
-    # assign_boxers_by_position: boxers[0] = slot ESQUERDA (Left), boxers[1] = slot
-    # DIREITA (Right). Ou seja, o ÍNDICE do boxeador É o slot - NÃO há re-ordenação
-    # por x aqui (a posição já foi resolvida no assign). Cada entrada:
+    # `boxers` é uma lista de 1 ou 2 entradas vinda de assign_boxers: boxers[0] =
+    # slot 0, boxers[1] = slot 1. O ÍNDICE do boxeador É o slot, e o slot é uma
+    # IDENTIDADE PERSISTENTE (mesmo lutador o clipe inteiro, fixado pelo track ID do
+    # ByteTrack) — NÃO é a posição na tela. Não há re-ordenação por x aqui. Cada entrada:
     #   frame_label (T) (class_idx,conf)|None  -> rótulo do golpe por frame
     #   coords      (T,17,2) normalizados      -> desenho do esqueleto (denormaliza p/ px)
     #   conf        (T,17)                      -> Annotator.kpts pula juntas fracas
     #   boxes       (T,4) pixels                -> caixa delimitadora
     #   present     (T,) bool                  -> só desenha caixa/esqueleto se visto
     #
-    # Os rótulos dizem "Left boxer"/"Right boxer" (posição), não um id fixo: como a
-    # identidade é por posição e pode trocar se os boxeadores se cruzam, descrever a
-    # POSIÇÃO atual é mais claro que um número que mudaria de dono.
+    # O NOME na tela é estável: "Boxer 1"/"Boxer 2", colado na identidade do slot — não
+    # muda de dono mesmo quando os lutadores se cruzam. Quem mostra o lado ATUAL da tela
+    # é a COR da caixa (SLOT_COLORS): verde e ciano acompanham o slot, não o nome.
     from ultralytics.utils.plotting import Annotator
 
-    slot_names = ("Left", "Right")   # boxers[0]=Left, boxers[1]=Right
+    # Nomes ESTÁVEIS de identidade: slot 0 = "Boxer 1", slot 1 = "Boxer 2". Persistem
+    # com o lutador (track ID), por isso não usamos mais "Left"/"Right" no nome.
+    slot_names = ("Boxer 1", "Boxer 2")
 
-    # Left/Right só faz sentido com DOIS boxeadores. slot_active marca quais slots
-    # são boxeadores REAIS = presentes em mais de MIN_PRESENCE_RATIO do clipe (não
+    # "Boxer 1"/"Boxer 2" só faz sentido com DOIS boxeadores. slot_active marca quais
+    # slots são boxeadores REAIS = presentes em mais de MIN_PRESENCE_RATIO do clipe (não
     # só "em algum frame"). Esse limiar descarta o slot fantasma criado por
     # detecções espúrias de "2 persons" em poucos frames - sem ele, um clipe de 1
-    # boxeador viraria "Left/Right" por causa de um reflexo de 5 frames.
+    # boxeador viraria "Boxer 1/Boxer 2" por causa de um reflexo de 5 frames.
     # two_boxers = ambos os slots são reais. Com um só, o rótulo vira "Boxer" e o
     # outro slot não é desenhado nem rotulado. active_idx = qual slot é o único real.
     total = len(boxers[0]["present"]) if boxers else 0
@@ -490,7 +501,8 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
     active_idx  = next((bi for bi in range(len(boxers)) if slot_active[bi]), 0)
 
     def disp_name(bi):
-        # nome curto da caixa: "Left"/"Right" com 2 boxeadores, senão "Boxer".
+        # nome curto da caixa: identidade estável "Boxer 1"/"Boxer 2" com 2
+        # boxeadores, senão só "Boxer" (sem número no caso de 1 lutador).
         return slot_names[bi] if two_boxers else "Boxer"
 
     cap = cv2.VideoCapture(video_path)
@@ -506,7 +518,7 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
         if not ret:
             break
 
-        # quem está presente neste frame (índice do boxeador = slot já fixo).
+        # quem está presente neste frame (índice do boxeador = slot de identidade fixo).
         # slot_active filtra o slot fantasma: um slot abaixo do limiar de presença
         # não é desenhado nem rotulado em frame nenhum, mesmo nos poucos frames
         # espúrios em que apareceu.
@@ -516,8 +528,8 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
             and frame_idx < len(boxers[bi]["present"]) and boxers[bi]["present"][frame_idx]
         ]
 
-        # texto de cada slot (ausente ou sem golpe -> "..."). slot_text[0]=Left,
-        # slot_text[1]=Right.
+        # texto de cada slot (ausente ou sem golpe -> "..."). slot_text[0]=Boxer 1,
+        # slot_text[1]=Boxer 2 (identidade, não lado da tela).
         slot_text = ["...", "..."]
         for bi in present:
             fl = boxers[bi]["frame_label"]
@@ -544,20 +556,20 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
         # caixas + rótulos: idênticos nos dois vídeos
         for img in (fb, fp):
             for bi in present:
-                color = SLOT_COLORS[bi]            # bi = slot (0=Left verde, 1=Right ciano)
+                color = SLOT_COLORS[bi]            # bi = slot/identidade (0=Boxer 1 verde, 1=Boxer 2 ciano)
                 x1, y1, x2, y2 = boxers[bi]["boxes"][frame_idx].astype(int)
                 cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(img, disp_name(bi), (x1, max(y1 - 8, 75)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
-            # barra de topo. Com 2 boxeadores: "Left boxer"/"Right boxer" lado a
-            # lado. Com 1 só: um único "Boxer: ..." (sem Left/Right). Slot vazio não
-            # recebe rótulo.
+            # barra de topo. Com 2 boxeadores: "Boxer 1"/"Boxer 2" lado a lado (nome
+            # de identidade estável; a COR é que indica o lado atual da tela). Com 1
+            # só: um único "Boxer: ..." (sem número). Slot vazio não recebe rótulo.
             cv2.rectangle(img, (0, 0), (video_width, 60), (0, 0, 0), -1)
             if two_boxers:
-                cv2.putText(img, f"Left boxer: {slot_text[0]}", (20, 40),
+                cv2.putText(img, f"Boxer 1: {slot_text[0]}", (20, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, SLOT_COLORS[0], 2, cv2.LINE_AA)
-                cv2.putText(img, f"Right boxer: {slot_text[1]}", (video_width // 2 + 20, 40),
+                cv2.putText(img, f"Boxer 2: {slot_text[1]}", (video_width // 2 + 20, 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, SLOT_COLORS[1], 2, cv2.LINE_AA)
             else:
                 cv2.putText(img, f"Boxer: {slot_text[active_idx]}", (20, 40),
@@ -603,6 +615,16 @@ if __name__ == "__main__":
 
     print("--> Loading TensorFlow model...")
     loaded_model = load_model(args.model)
+
+    # Sanidade: o nº de saídas do softmax tem que bater com BOXING_CLASSES. Se o
+    # modelo for retreinado com outro conjunto de classes (ex.: voltar pras 6
+    # antigas), os rótulos ficariam todos trocados em silêncio — aqui isso grita.
+    n_out = loaded_model.output_shape[-1]
+    if n_out != len(BOXING_CLASSES):
+        print(f"--> AVISO: modelo tem {n_out} classes de saída, mas BOXING_CLASSES "
+              f"tem {len(BOXING_CLASSES)} ({BOXING_CLASSES}). Os rótulos vão sair "
+              f"errados — ajuste BOXING_CLASSES para casar com o modelo.")
+
     mean, std = load_norm_stats()
 
     # Cache: usa prefixo "tdets_" (tracked detections) para invalidar caches
@@ -629,14 +651,15 @@ if __name__ == "__main__":
             dtype=object,
         ))
 
-    # Identidade híbrida: IDs do YOLO estabilizam, posição garante cobertura
+    # Identidade persistente por track ID (ByteTrack); posição só garante cobertura
     slots = assign_boxers(frames_dets, total_frames, video_width)
 
-    # Este loop roda UMA VEZ POR SLOT (Left, depois Right). Tudo dentro dele -
-    # inclusive a suavização 5-tap - executa por boxeador.
+    # Este loop roda UMA VEZ POR SLOT (Boxer 1, depois Boxer 2). Cada slot é uma
+    # identidade fixa (mesmo lutador o clipe todo), não um lado da tela. Tudo dentro
+    # dele - inclusive a suavização 5-tap - executa por boxeador.
     boxers = []
     for i, slot in enumerate(slots):
-        print(f"--> {'Left' if i == 0 else 'Right'} boxer:")
+        print(f"--> Boxer {i + 1}:")
 
         # 1) esqueleto DENSO (lacunas preenchidas) para a classificação
         dense = build_dense_skeletons(slot, total_frames)
