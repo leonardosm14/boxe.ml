@@ -69,7 +69,12 @@ def make_window(skeletons, end_idx, real_len=REAL_LEN):
     Retorna (25, 34) ou None se ainda não há frames reais suficientes.
     """
     start = end_idx - real_len + 1
-    if start < 0:
+    # Guarda de borda: None se não há frames reais suficientes ANTES (start<0) OU
+    # se a janela passa do ÚLTIMO frame (end_idx fora do range). Sem o segundo
+    # cheque, um golpe cujo pico cai perto do fim do vídeo faz a fatia
+    # skeletons[start:end_idx+1] vir mais curta que real_len -> broadcast error
+    # (ex.: (9,17,2) em (10,17,2)). classify_events ignora janelas None.
+    if start < 0 or end_idx >= len(skeletons):
         return None
     window = np.zeros((WINDOW_LEN, 17, 2), dtype=np.float32)
     window[:real_len] = skeletons[start:end_idx + 1]
