@@ -218,27 +218,6 @@ def assign_boxers(frames_dets, total_frames, video_width):
 
 
 def build_dense_skeletons(track, total_frames):
-    # MUDANÇA - MATRIZ DENSA POR BOXEADOR COM PREENCHIMENTO DE LACUNAS
-    # ---------------------------------------------------------------
-    # O classificador precisa de UM esqueleto por frame, sem buracos, porque
-    # make_window() (boxe_utils) recorta uma tira de frames CONTÍGUOS. O track de
-    # um boxeador é esparso: o id dele falta em alguns frames (oclusão, blur, borda
-    # do frame, ou reprovado no filtro de confiança). Um buraco = linha de zeros =
-    # o punho "teleporta" para (0,0) e volta = movimento explosivo falso = predição
-    # lixo.
-    #
-    # Esta função transforma o track esparso na matriz densa (total_frames, 17, 2)
-    # que o código de 1 boxeador antigo produzia. A regra de preenchimento é
-    # EXATAMENTE a mesma que o extract_skeletons ANTIGO usava no nível de uma
-    # pessoa (boxe.py:116-117 da versão antiga): "se este frame está vazio, copia o
-    # frame anterior pra frente". Isso mantém a matriz contínua para que
-    # velocidade/aceleração em preprocess_windows() não disparem numa linha de zero.
-    #
-    # Chamada em __main__, uma vez por boxeador selecionado: o resultado denso é
-    # depois suavizado (mesma média móvel de 5 frames de antes, inline no __main__)
-    # e passado a classify_events(). Separamos isto da extração porque, com 2
-    # boxeadores, "copiar o frame anterior" tem que ser POR PESSOA - o buraco do
-    # boxeador A copia a última pose do A, não a de outro.
     coords  = track["coords"]
     present = track["present"]
 

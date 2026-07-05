@@ -55,8 +55,7 @@ Por padrão o script procura por `modelo_boxe.keras` na raiz do projeto. Também
 ## Exemplo básico
 
 ```bash
-python3 boxe.py \
-    -v videos/exemplo.mp4
+python3 boxe.py --video videos/exemplo.mp4
 ```
 
 O vídeo processado será salvo automaticamente em:
@@ -70,9 +69,7 @@ outputs/exemplo.mp4
 ## Especificando um modelo customizado
 
 ```bash
-python3 boxe.py \
-    -v videos/exemplo.mp4 \
-    -m modelos/meu_modelo.keras
+python3 boxe.py --video videos/exemplo.mp4 --model modelos/meu_modelo.keras
 ```
 
 ---
@@ -80,9 +77,7 @@ python3 boxe.py \
 ## Especificando o vídeo de saída
 
 ```bash
-python3 boxe.py \
-    -v videos/exemplo.mp4 \
-    -o resultado.mp4
+python3 boxe.py --video videos/exemplo.mp4 --output outputs/
 ```
 
 ---
@@ -94,9 +89,7 @@ Durante a primeira execução, os esqueletos extraídos pelo YOLO são armazenad
 Para forçar uma nova extração:
 
 ```bash
-python3 boxe.py \
-    -v videos/exemplo.mp4 \
-    --clear-cache
+python3 boxe.py --video videos/exemplo.mp4 --clear-cache
 ```
 
 ---

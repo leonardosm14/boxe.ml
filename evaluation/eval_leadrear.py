@@ -22,9 +22,9 @@ from tensorflow.keras.models import load_model
 
 CACHE = sys.argv[1] if len(sys.argv) > 1 else "tdets_adam_clean.npy"
 
-from boxe import classify_events, load_norm_stats, smooth_dense
-from tracking import assign_boxers, build_dense_skeletons
-from stance_utils import collapse_class
+from ..boxe import classify_events, load_norm_stats, smooth_dense
+from ..tracking import assign_boxers, build_dense_skeletons
+from ..utils.stance_utils import collapse_class
 
 LEAD = {"Jab", "Lead Hook", "Lead Uppercut"}
 

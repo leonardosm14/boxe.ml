@@ -23,10 +23,10 @@ except ImportError:
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 
-from boxe_utils import make_window, preprocess_windows
+from utils.boxe_utils import make_window, preprocess_windows
 from tracking import extract_skeletons, assign_boxers, build_dense_skeletons
 from stance import lead_rear
-from stance_utils import expand_class
+from utils.stance_utils import expand_class
 
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:

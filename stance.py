@@ -263,7 +263,7 @@ def stance_confidence(skeletons):
 
 
 if __name__ == "__main__":
-    from boxe_utils import load_video
+    from utils.boxe_utils import load_video
 
     SPLITS = {
         "TRAIN (V1,V2,V7,V8)": ["V1", "V2", "V7", "V8"],
