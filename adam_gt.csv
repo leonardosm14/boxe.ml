@@ -1,0 +1,19 @@
+start_frame,end_frame,class
+1,39,Jab
+42,92,Cross
+93,139,Lead Hook
+144,189,Rear Hook
+192,240,Lead Uppercut
+243,286,Rear Uppercut
+293,311,Jab
+311,325,Cross
+327,348,Lead Hook
+349,364,Rear Hook
+368,388,Lead Uppercut
+390,404,Rear Uppercut
+424,435,Jab
+435,443,Cross
+443,453,Lead Hook
+453,460,Rear Hook
+462,473,Lead Uppercut
+474,483,Rear Uppercut
