@@ -23,7 +23,7 @@ O sistema recebe um vídeo como entrada, extrai os keypoints corporais utilizand
 > extensão define a "frente" local — o pé desse lado é o lead. Medido no
 > BoxingVI: 0.85 (treino) / 0.77 (cross-video) / 0.74 (teste) de acurácia
 > lead/rear; no nosso vídeo próprio anotado (adam): 0.89 por segmento.
-> Validação: `python3 stance.py` (gate no dataset) e `python3 eval_leadrear.py`
+> Validação: `python3 stance.py` (gate no dataset) e `python3 evaluation/eval_leadrear.py`
 > (end-to-end contra `adam_gt.csv`). O treino do modelo de tipo está em
 > `training.ipynb`.
 
