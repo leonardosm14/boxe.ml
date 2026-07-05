@@ -1,5 +1,9 @@
 # Detecção e Classificação de Golpes em Boxe
 
+> **Aviso de uso de IA:** este projeto utilizou assistentes de IA generativa como
+> ferramenta de apoio (pesquisa, boilerplate, depuração e revisão). O compilado de
+> prompts e o detalhamento do uso estão em [`PROMPTS.md`](PROMPTS.md).
+
 Pipeline para reconhecimento automático de golpes de boxe utilizando **YOLOv8 Pose** para extração de esqueletos humanos e **TensorFlow** para classificação automática dos golpes.
 
 Os golpes atualmente suportados são:
@@ -11,12 +15,17 @@ Os golpes atualmente suportados são:
 * Rear Hook
 * Rear Uppercut
 
-O sistema recebe um vídeo como entrada, extrai os keypoints corporais utilizando o modelo de pose do YOLOv8, realiza o pré-processamento dos esqueletos e aplica um modelo treinado em TensorFlow para identificar os golpes ao longo do vídeo.
+O sistema recebe um vídeo como entrada, extrai os keypoints corporais utilizando o modelo de pose do YOLOv8 (com tracking ByteTrack para manter a identidade de cada lutador), realiza o pré-processamento dos esqueletos e aplica um modelo LSTM treinado em TensorFlow para identificar o **tipo** do golpe (Straight/Hook/Uppercut). A **mão** do golpe (lead vs rear) é decidida em seguida por geometria pura sobre os keypoints (`stance.py`), expandindo as 3 classes do modelo para as 6 classes finais (`stance_utils.py`).
 
-> **Atualizações** (detalhes em [`MUDANCAS.md`](MUDANCAS.md), próximos passos em [`PLANO_ACAO.md`](PLANO_ACAO.md)):
-> a normalização passou a ser **relativa ao corpo** (recentro no quadril + escala de ombro,
-> invariante a posição/escala/câmera) e a inferência passou a ser **por evento** (segmentação
-> por movimento do punho → 1 rótulo estável por golpe). O modelo é treinado por `train.py`.
+> **Como funciona a divisão 3+lead/rear:** o tipo do golpe é aprendível da
+> trajetória, mas a mão é ambígua numa janela isolada. Por golpe detectado, o
+> punho de maior deslocamento líquido define a mão que golpeou e a direção de
+> extensão define a "frente" local — o pé desse lado é o lead. Medido no
+> BoxingVI: 0.85 (treino) / 0.77 (cross-video) / 0.74 (teste) de acurácia
+> lead/rear; no nosso vídeo próprio anotado (adam): 0.89 por segmento.
+> Validação: `python3 stance.py` (gate no dataset) e `python3 eval_leadrear.py`
+> (end-to-end contra `adam_gt.csv`). O treino do modelo de tipo está em
+> `training.ipynb`.
 
 ---
 
@@ -107,7 +116,7 @@ O YOLOv8-Pose detecta o atleta e extrai:
 Os esqueletos são armazenados em cache no formato:
 
 ```text
-skeletons_<nome_do_video>.npy
+tdets_<nome_do_video>.npy
 ```
 
 ---

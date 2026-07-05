@@ -10,11 +10,23 @@ import argparse
 import subprocess
 import cv2
 import numpy as np
+
+# Torch ANTES do tensorflow: os dois embarcam runtimes CUDA próprios e, com o
+# tf carregado primeiro, o torch falha ao resolver símbolos do libcudart
+# (ImportError em libc10_cuda.so, visto no vlab). O torch já é dependência
+# nossa via ultralytics (YOLO), então só antecipamos o carregamento.
+try:
+    import torch  # noqa: F401
+except ImportError:
+    pass
+
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 
 from boxe_utils import make_window, preprocess_windows
 from tracking import extract_skeletons, assign_boxers, build_dense_skeletons
+from stance import lead_rear
+from stance_utils import expand_class
 
 gpus = tf.config.list_physical_devices('GPU')
 if gpus:
@@ -157,14 +169,26 @@ def detect_events(skeletons):
     return events, spd
 
 
-def classify_events(skeletons, model, mean, std):
+def smooth_dense(dense, window_size=5):
+    """Suavização temporal 5-tap por junta/coordenada (mesma conta do código
+    original, extraída para função para ser reutilizada pelo eval)."""
+    for joint in range(17):
+        for coord in range(2):
+            signal = dense[:, joint, coord]
+            padded = np.pad(signal, (window_size // 2, window_size // 2), mode="edge")
+            dense[:, joint, coord] = np.convolve(
+                padded, np.ones(window_size) / window_size, mode="valid")
+    return dense
+
+
+def classify_events(skeletons, model, mean, std, skeletons_raw=None):
     # MUDANÇA - CLASSIFICAÇÃO EXTRAÍDA PARA RODAR POR BOXEADOR
     # -------------------------------------------------------
     # Isto é REORGANIZAÇÃO de código, não algoritmo novo. A lógica de detectar e
     # classificar golpes vivia GRUDADA dentro de save_video_with_predictions, que
     # assumia 1 boxeador. Aqui ela vira função própria que recebe o esqueleto denso
     # de UM boxeador e devolve `frame_label` (lista de tamanho T, cada item
-    # (class_idx, conf) ou None). Assim dá pra CHAMAR uma vez por boxeador.
+    # (nome_da_classe_6, conf) ou None). Assim dá pra CHAMAR uma vez por boxeador.
     #
     # A lógica é copiada igual da versão antiga:
     #   1. detect_events() acha rajadas de velocidade do punho (1 rajada = 1 golpe);
@@ -175,6 +199,14 @@ def classify_events(skeletons, model, mean, std):
     #      próximo golpe.
     # Lacunas viram pose congelada (build_dense_skeletons) -> velocidade do punho ~0
     # -> nenhum evento falso ali.
+    #
+    # `skeletons_raw` = esqueleto denso SEM a suavização 5-tap. A geometria
+    # lead/rear PRECISA do sinal cru: um soco rápido é ida-e-volta em poucos
+    # frames e a média móvel achata o deslocamento do punho que golpeou (medido
+    # no adam: lead/rear cai de 0.89 para 0.28 com janelas suavizadas). O
+    # detector de eventos e o modelo continuam no esqueleto suavizado.
+    if skeletons_raw is None:
+        skeletons_raw = skeletons
     events, spd = detect_events(skeletons)
 
     X_batch, owner = [], []
@@ -188,6 +220,7 @@ def classify_events(skeletons, model, mean, std):
 
     n = len(skeletons)
     frame_label = [None] * n
+    shown_events = []   # (onset, pico, offset, rótulo 6 classes, conf, lado) por golpe exibido
     n_shown = 0
     if X_batch:
         preds = model.predict(np.concatenate(X_batch), batch_size=512, verbose=0)
@@ -201,6 +234,23 @@ def classify_events(skeletons, model, mean, std):
             if conf < CONF_FLOOR:                        # rejeita evento ambíguo
                 continue
             n_shown += 1
+            # INFERÊNCIA LEAD/REAR (3 -> 6 classes): o modelo decide o TIPO
+            # (Straight/Hook/Uppercut); a MÃO (lead vs rear) é decidida por
+            # geometria pura sobre a MESMA janela do golpe (stance.lead_rear):
+            # punho de maior deslocamento líquido = mão que golpeou; a extensão
+            # desse punho define a "frente" local e o pé desse lado é o lead.
+            # Decisão POR GOLPE (não por stance global do clipe) — a stance
+            # estática foi testada e é ruído neste cenário (ver stance.py).
+            # Janela do lado = o SEGMENTO detectado do golpe (com folga de 2
+            # frames antes do onset p/ capturar a posição de guarda inicial),
+            # no esqueleto CRU. O segmento inteiro (windup -> extensão) dá a
+            # trajetória completa que a geometria precisa.
+            side_window = skeletons_raw[max(on - 2, 0):off + 1]
+            side = lead_rear(side_window)                # "lead" | "rear"
+            label = expand_class(BOXING_CLASSES[ci], side) or BOXING_CLASSES[ci]
+            print(f"    evento {ei}: frames {on}-{off} (pico {pk}) -> "
+                  f"{label} [{side}] ({conf * 100:.1f}%)")
+            shown_events.append((on, pk, off, label, conf, side))
             # rótulo do snap (onset) até o fim do follow-through (impacto + retração),
             # sem invadir o próximo golpe -> o rótulo fica até o golpe acabar
             end = max(off, pk + SPAN_POST)
@@ -208,9 +258,9 @@ def classify_events(skeletons, model, mean, std):
                 end = min(end, events[ei + 1][0] - 1)
             end = min(end, n - 1)
             for f in range(on, end + 1):
-                frame_label[f] = (ci, conf)               # 1 rótulo fixo no span do golpe
+                frame_label[f] = (label, conf)            # 1 rótulo (6 classes) fixo no span do golpe
     print(f"--> {len(events)} segmentos | {n_shown} eventos exibidos após rejeição")
-    return frame_label
+    return frame_label, shown_events
 
 
 def _convert_h264(temp_path, final_path):
@@ -312,8 +362,8 @@ def render_videos(video_path, out_box_path, out_pose_path, boxers, video_width, 
             fl = boxers[bi]["frame_label"]
             lab = fl[frame_idx] if frame_idx < len(fl) else None
             if lab is not None:
-                ci, conf = lab
-                slot_text[bi] = f"{BOXING_CLASSES[ci]} ({conf * 100:.1f}%)"
+                name, conf = lab                          # nome já expandido (6 classes)
+                slot_text[bi] = f"{name} ({conf * 100:.1f}%)"
 
         # duas cópias do frame: caixa-só e caixa+esqueleto
         fb = frame.copy()
@@ -439,19 +489,15 @@ if __name__ == "__main__":
         print(f"--> Boxer {i + 1}:")
 
         # 1) esqueleto DENSO (lacunas preenchidas) para a classificação
-        dense = build_dense_skeletons(slot, total_frames)
+        dense_raw = build_dense_skeletons(slot, total_frames)
 
-        # 2) suavização temporal 5-tap (mesma conta do código original)
-        window_size = 5
-        for joint in range(17):
-            for coord in range(2):
-                signal = dense[:, joint, coord]
-                padded = np.pad(signal, (window_size // 2, window_size // 2), mode="edge")
-                smoothed = np.convolve(padded, np.ones(window_size) / window_size, mode="valid")
-                dense[:, joint, coord] = smoothed
+        # 2) suavização temporal 5-tap (mesma conta do código original) — usada
+        #    pelo detector de eventos e pelo modelo; o CRU vai para o lead/rear.
+        dense = smooth_dense(dense_raw.copy())
 
         # 3) classifica os golpes deste boxeador (detect_events + média no pico)
-        frame_label = classify_events(dense, loaded_model, mean, std)
+        frame_label, _ = classify_events(dense, loaded_model, mean, std,
+                                         skeletons_raw=dense_raw)
 
         # 4) dados para o render. coords/conf/boxes/present vêm do slot CRU (não
         #    preenchido) porque o desenho só mostra frames realmente vistos.

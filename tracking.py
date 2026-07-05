@@ -21,7 +21,6 @@ configuração certa quando extract_skeletons instancia o YOLO.
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 
 def extract_skeletons(video_path):
@@ -41,6 +40,11 @@ def extract_skeletons(video_path):
     #                  "box"    (4,)   caixa x1,y1,x2,y2 em PIXELS
     #                  "tid"    int|None  track ID do YOLO (None se indisponível)
     #   total_frames, video_width, video_height
+    # Import tardio (mesmo padrão do Annotator em boxe.py): ultralytics puxa o
+    # torch, que conflita com o tensorflow quando os dois carregam no mesmo
+    # processo em certas versões. Com cache de esqueletos, o YOLO nem carrega.
+    from ultralytics import YOLO
+
     print(f"--> [1/3] Running YOLO-Pose: {video_path}")
     model_yolo = YOLO("yolov8m-pose.pt")
 
