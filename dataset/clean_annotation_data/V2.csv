@@ -1,0 +1,233 @@
+start_frame,end_frame,class
+6675,6688,Jab
+6689,6697,Cross
+6698,6710,Lead Hook
+6722,6734,Jab
+6735,6745,Cross
+6746,6759,Lead Hook
+6772,6790,Jab
+6791,6807,Cross
+6808,6824,Lead Hook
+7255,7263,Cross
+7264,7276,Lead Hook
+7287,7300,Jab
+7301,7309,Cross
+7310,7321,Lead Hook
+7332,7344,Jab
+7345,7353,Cross
+7354,7365,Lead Hook
+7374,7385,Jab
+7386,7394,Cross
+7395,7407,Lead Hook
+7410,7419,Jab
+7420,7431,Cross
+7432,7444,Lead Hook
+7450,7462,Lead Hook
+7475,7492,Cross
+7493,7505,Lead Hook
+7506,7521,Lead Hook
+7550,7559,Cross
+7560,7569,Lead Hook
+7574,7587,Lead Hook
+7922,7932,Cross
+7933,7944,Lead Hook
+7947,7962,Lead Hook
+7977,7985,Cross
+7986,7998,Lead Hook
+8000,8011,Lead Hook
+8024,8035,Cross
+8036,8046,Lead Hook
+8051,8065,Lead Hook
+8074,8083,Cross
+8084,8095,Lead Hook
+8096,8111,Lead Hook
+8129,8144,Lead Uppercut
+8145,8156,Rear Uppercut
+8157,8174,Lead Hook
+8180,8199,Lead Uppercut
+8200,8210,Rear Uppercut
+8212,8226,Lead Hook
+8243,8255,Lead Uppercut
+8256,8262,Rear Uppercut
+8263,8274,Lead Hook
+8633,8642,Lead Hook
+8643,8649,Rear Uppercut
+8650,8663,Lead Hook
+8676,8689,Lead Uppercut
+8690,8696,Rear Uppercut
+8697,8709,Lead Hook
+8719,8730,Lead Uppercut
+8731,8737,Rear Uppercut
+8738,8748,Lead Hook
+8756,8766,Lead Uppercut
+8767,8775,Rear Uppercut
+8776,8787,Lead Hook
+8795,8803,Lead Uppercut
+8804,8811,Rear Uppercut
+8812,8822,Lead Hook
+8827,8839,Lead Uppercut
+8840,8850,Rear Uppercut
+8861,8874,Jab
+8875,8886,Cross
+8887,8896,Lead Hook
+8916,8932,Jab
+8933,8944,Cross
+8945,8954,Lead Hook
+8973,8983,Jab
+8984,8991,Cross
+8992,9003,Lead Hook
+9371,9383,Jab
+9384,9391,Cross
+9392,9402,Lead Hook
+9418,9428,Jab
+9429,9436,Cross
+9437,9448,Lead Hook
+9460,9470,Jab
+9471,9479,Cross
+9480,9489,Lead Hook
+9501,9511,Jab
+9512,9523,Cross
+9524,9537,Lead Hook
+9543,9556,Jab
+9557,9565,Cross
+9579,9589,Cross
+9593,9605,Lead Hook
+9610,9622,Lead Hook
+9644,9656,Cross
+9661,9673,Lead Hook
+9680,9691,Lead Hook
+10156,10166,Lead Hook
+10172,10183,Lead Hook
+10203,10213,Cross
+10218,10228,Lead Hook
+10233,10244,Lead Hook
+10260,10271,Cross
+10272,10281,Lead Hook
+10298,10306,Lead Uppercut
+10307,10316,Rear Uppercut
+10317,10328,Lead Hook
+10340,10350,Lead Uppercut
+10356,10365,Rear Uppercut
+10366,10379,Lead Hook
+10399,10406,Lead Uppercut
+10407,10413,Rear Uppercut
+10412,10422,Lead Hook
+10433,10440,Lead Uppercut
+10441,10447,Rear Uppercut
+10448,10456,Lead Hook
+10469,10476,Lead Uppercut
+10477,10484,Rear Uppercut
+10485,10495,Lead Hook
+10933,10940,Lead Uppercut
+10941,10948,Rear Uppercut
+10949,10959,Lead Hook
+10965,10975,Lead Uppercut
+10976,10982,Rear Uppercut
+10983,10992,Lead Hook
+12433,12444,Jab
+12445,12455,Cross
+12456,12470,Jab
+12486,12496,Jab
+12497,12504,Cross
+12505,12520,Jab
+12536,12545,Jab
+12546,12553,Cross
+12554,12567,Jab
+12583,12592,Jab
+12597,12608,Jab
+12614,12623,Jab
+12624,12632,Cross
+13016,13027,Jab
+13028,13035,Cross
+13036,13050,Jab
+13063,13073,Jab
+13074,13082,Cross
+13083,13097,Jab
+13111,13121,Jab
+13122,13131,Cross
+13132,13148,Jab
+13152,13162,Rear Uppercut
+13163,13171,Lead Uppercut
+13172,13179,Rear Uppercut
+13180,13187,Lead Uppercut
+13188,13194,Rear Uppercut
+13195,13201,Lead Uppercut
+13202,13208,Rear Uppercut
+13210,13218,Lead Uppercut
+13219,13226,Rear Uppercut
+13227,13234,Lead Uppercut
+13235,13241,Rear Uppercut
+13242,13249,Lead Uppercut
+13250,13258,Rear Uppercut
+13259,13267,Lead Uppercut
+13268,13275,Rear Uppercut
+13276,13283,Lead Uppercut
+13284,13289,Rear Uppercut
+13290,13298,Lead Uppercut
+13299,13306,Rear Uppercut
+13307,13314,Lead Uppercut
+13315,13321,Rear Uppercut
+13322,13330,Lead Uppercut
+13331,13337,Rear Uppercut
+13338,13344,Lead Uppercut
+13345,13352,Rear Uppercut
+13353,13360,Lead Uppercut
+13706,13713,Rear Uppercut
+13714,13719,Lead Uppercut
+13720,13727,Rear Uppercut
+13728,13733,Lead Uppercut
+13734,13741,Rear Uppercut
+13742,13747,Lead Uppercut
+13748,13755,Rear Uppercut
+13756,13762,Lead Uppercut
+13763,13768,Rear Uppercut
+13769,13774,Lead Uppercut
+13775,13781,Rear Uppercut
+13782,13788,Lead Uppercut
+13789,13795,Rear Uppercut
+13796,13802,Lead Uppercut
+13803,13809,Rear Uppercut
+13810,13817,Lead Uppercut
+13818,13823,Rear Uppercut
+13824,13830,Lead Uppercut
+13831,13838,Rear Uppercut
+13839,13844,Lead Uppercut
+13845,13852,Rear Uppercut
+13853,13861,Lead Uppercut
+13862,13868,Rear Uppercut
+13869,13876,Lead Uppercut
+13877,13883,Rear Uppercut
+13884,13892,Lead Uppercut
+13893,13899,Rear Uppercut
+13900,13906,Lead Uppercut
+13907,13914,Rear Uppercut
+13915,13921,Lead Uppercut
+13922,13929,Rear Uppercut
+13930,13935,Lead Uppercut
+13936,13943,Rear Uppercut
+13944,13950,Lead Uppercut
+13951,13957,Rear Uppercut
+13958,13963,Lead Uppercut
+13964,13970,Rear Uppercut
+13971,13978,Lead Uppercut
+13979,13985,Rear Uppercut
+13986,13993,Lead Uppercut
+13994,13999,Rear Uppercut
+14000,14007,Lead Uppercut
+14008,14013,Rear Uppercut
+14014,14020,Lead Uppercut
+14021,14027,Rear Uppercut
+14028,14033,Lead Uppercut
+14034,14040,Rear Uppercut
+14041,14047,Lead Uppercut
+14048,14054,Rear Uppercut
+14055,14061,Lead Uppercut
+14509,14516,Lead Uppercut
+14517,14524,Rear Uppercut
+14525,14531,Lead Uppercut
+14532,14539,Rear Uppercut
+14540,14547,Lead Uppercut
+14548,14554,Rear Uppercut
+14555,14561,Lead Uppercut
+14562,14569,Rear Uppercut
+14570,14577,Lead Uppercut

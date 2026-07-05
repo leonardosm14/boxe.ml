@@ -1,0 +1,10 @@
+.ipynb_checkpoints
+.jp
+__pycache__/
+*.pt
+skeletons*
+best_*
+25fps/
+_*.py
+_*.sh
+__temp__*

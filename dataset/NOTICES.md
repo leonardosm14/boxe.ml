@@ -1,0 +1,3 @@
+## NOTICE
+
+This dataset was collected from the paper **BoxingVI: A Multi-Modal Benchmark for Boxing Action Recognition and Localization** (KUMAR, R. et al, 2025), available at [doi.org/10.48550/arXiv.2511.16524](doi.org/10.48550/arXiv.2511.16524). The GitHub repository with more instructions and dataset download link is available at [github.com/Bikudebug/BoxingVI](https://github.com/Bikudebug/BoxingVI).
